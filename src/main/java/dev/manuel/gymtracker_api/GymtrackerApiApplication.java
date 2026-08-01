@@ -1,0 +1,13 @@
+package dev.manuel.gymtracker_api;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class GymtrackerApiApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(GymtrackerApiApplication.class, args);
+	}
+
+}
