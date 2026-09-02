@@ -1,5 +1,6 @@
 package dev.manuel.gymtracker_api.user.service;
 
+import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
 import dev.manuel.gymtracker_api.user.dto.CreateUserRequest;
 import dev.manuel.gymtracker_api.user.dto.UserResponse;
 import dev.manuel.gymtracker_api.user.exception.EmailAlreadyExistsException;
@@ -42,6 +43,17 @@ public class UserService {
                 savedUser.getId(),
                 savedUser.getEmail(),
                 savedUser.getCreatedAt()
+        );
+    }
+
+    public UserResponse getUserById(UUID id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User", id));
+
+        return new UserResponse(
+                user.getId(),
+                user.getEmail(),
+                user.getCreatedAt()
         );
     }
 }
