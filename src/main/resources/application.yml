@@ -1,0 +1,8 @@
+spring:
+    application:
+        name: gymtracker-api
+
+    datasource:
+        url: jdbc:postgresql://localhost:5433/gymtracker
+        username: gymtracker
+        password: gymtracker

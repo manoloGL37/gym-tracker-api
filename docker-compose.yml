@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: gymtracker
+      POSTGRES_USER: gymtracker
+      POSTGRES_PASSWORD: gymtracker
+    ports:
+      - "5433:5432"
+    volumes:
+      - gymtracker_data:/var/lib/postgresql/data
+
+volumes:
+  gymtracker_data:
