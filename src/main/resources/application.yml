@@ -6,3 +6,7 @@ spring:
         url: jdbc:postgresql://localhost:5433/gymtracker
         username: gymtracker
         password: gymtracker
+
+jwt:
+    secret: ${JWT_SECRET}
+    expiration: 3600000

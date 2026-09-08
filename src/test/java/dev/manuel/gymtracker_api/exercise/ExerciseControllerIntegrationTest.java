@@ -1,5 +1,6 @@
 package dev.manuel.gymtracker_api.exercise;
 
+import dev.manuel.gymtracker_api.auth.security.JwtService;
 import dev.manuel.gymtracker_api.exercise.dto.ExercisePageResponse;
 import dev.manuel.gymtracker_api.exercise.model.Exercise;
 import dev.manuel.gymtracker_api.exercise.model.ExerciseTranslation;
@@ -10,12 +11,15 @@ import dev.manuel.gymtracker_api.user.model.User;
 import dev.manuel.gymtracker_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestConstructor;
+import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -24,327 +28,362 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @Testcontainers
 @SpringBootTest
+@AutoConfigureMockMvc
+@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
 class ExerciseControllerIntegrationTest {
 
-    @Container
-    static PostgreSQLContainer<?> postgres =
-            new PostgreSQLContainer<>("postgres:17")
-                    .withDatabaseName("gymtracker_test")
-                    .withUsername("gymtracker")
-                    .withPassword("gymtracker");
+        @Container
+        static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")
+                        .withDatabaseName("gymtracker_test")
+                        .withUsername("gymtracker")
+                        .withPassword("gymtracker");
 
-    @DynamicPropertySource
-    static void configureDatasource(DynamicPropertyRegistry registry) {
-        registry.add(
-                "spring.datasource.url",
-                postgres::getJdbcUrl
-        );
-        registry.add(
-                "spring.datasource.username",
-                postgres::getUsername
-        );
-        registry.add(
-                "spring.datasource.password",
-                postgres::getPassword
-        );
-    }
+        @DynamicPropertySource
+        static void configureDatasource(DynamicPropertyRegistry registry) {
 
-    @Autowired
-    private ExerciseService exerciseService;
+                registry.add(
+                                "spring.datasource.url",
+                                postgres::getJdbcUrl);
 
-    @Autowired
-    private ExerciseRepository exerciseRepository;
+                registry.add(
+                                "spring.datasource.username",
+                                postgres::getUsername);
 
-    @Autowired
-    private ExerciseTranslationRepository translationRepository;
+                registry.add(
+                                "spring.datasource.password",
+                                postgres::getPassword);
+        }
 
-    @Autowired
-    private UserRepository userRepository;
+        private final MockMvc mockMvc;
+        private final ExerciseService exerciseService;
+        private final ExerciseRepository exerciseRepository;
+        private final ExerciseTranslationRepository translationRepository;
+        private final UserRepository userRepository;
+        private final JwtService jwtService;
+        private final PasswordEncoder passwordEncoder;
 
-    private UUID userA;
-    private UUID userB;
+        private UUID userA;
+        private UUID userB;
 
-    @BeforeEach
-    void setUp() {
-        translationRepository.deleteAll();
-        exerciseRepository.deleteAll();
-        userRepository.deleteAll();
+        ExerciseControllerIntegrationTest(
+                        MockMvc mockMvc,
+                        ExerciseService exerciseService,
+                        ExerciseRepository exerciseRepository,
+                        ExerciseTranslationRepository translationRepository,
+                        UserRepository userRepository,
+                        JwtService jwtService,
+                        PasswordEncoder passwordEncoder) {
+                this.mockMvc = mockMvc;
+                this.exerciseService = exerciseService;
+                this.exerciseRepository = exerciseRepository;
+                this.translationRepository = translationRepository;
+                this.userRepository = userRepository;
+                this.jwtService = jwtService;
+                this.passwordEncoder = passwordEncoder;
+        }
 
-        userA = createUser();
-        userB = createUser();
+        @BeforeEach
+        void setUp() {
 
-        createExercise(
-                null,
-                "Press Bench",
-                "chest",
-                "barbell",
-                "EXERCISES_DATASET"
-        );
+                translationRepository.deleteAll();
+                exerciseRepository.deleteAll();
+                userRepository.deleteAll();
 
-        createExercise(
-                userA,
-                "My Custom Press",
-                "chest",
-                "dumbbell",
-                "USER"
-        );
+                userA = createUser();
+                userB = createUser();
 
-        createExercise(
-                userB,
-                "Private Press",
-                "chest",
-                "barbell",
-                "USER"
-        );
+                createExercise(
+                                null,
+                                "Press Bench",
+                                "chest",
+                                "barbell",
+                                "EXERCISES_DATASET");
 
-        Exercise deletedExercise = createExercise(
-                null,
-                "Deleted Exercise",
-                "chest",
-                "barbell",
-                "EXERCISES_DATASET"
-        );
+                createExercise(
+                                userA,
+                                "My Custom Press",
+                                "chest",
+                                "dumbbell",
+                                "USER");
 
-        deletedExercise.setDeletedAt(LocalDateTime.now());
-        exerciseRepository.save(deletedExercise);
+                createExercise(
+                                userB,
+                                "Private Press",
+                                "chest",
+                                "barbell",
+                                "USER");
 
-        createExercise(
-                null,
-                "Back Squat",
-                "legs",
-                "barbell",
-                "EXERCISES_DATASET"
-        );
-    }
+                Exercise deletedExercise = createExercise(
+                                null,
+                                "Deleted Exercise",
+                                "chest",
+                                "barbell",
+                                "EXERCISES_DATASET");
 
-    @Test
-    void shouldReturnGlobalAndOwnExercises() {
-        Pageable pageable = PageRequest.of(0, 20);
+                deletedExercise.setDeletedAt(LocalDateTime.now());
+                exerciseRepository.save(deletedExercise);
 
-        ExercisePageResponse response =
-                exerciseService.getAvailableExercises(
-                        userA,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        pageable
-                );
+                createExercise(
+                                null,
+                                "Back Squat",
+                                "legs",
+                                "barbell",
+                                "EXERCISES_DATASET");
+        }
 
-        assertEquals(3, response.totalElements());
-        assertEquals(3, response.content().size());
+        @Test
+        void shouldReturnGlobalAndOwnExercises() {
 
-        assertTrue(
-                response.content()
-                        .stream()
-                        .anyMatch(exercise ->
-                                exercise.translations()
-                                        .stream()
-                                        .anyMatch(translation ->
-                                                "Press Bench".equals(
-                                                        translation.name()
-                                                )
-                                        )
-                        )
-        );
+                Pageable pageable = PageRequest.of(0, 20);
 
-        assertTrue(
-                response.content()
-                        .stream()
-                        .anyMatch(exercise ->
-                                exercise.translations()
-                                        .stream()
-                                        .anyMatch(translation ->
-                                                "My Custom Press".equals(
-                                                        translation.name()
-                                                )
-                                        )
-                        )
-        );
+                ExercisePageResponse response = exerciseService.getAvailableExercises(
+                                userA,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                pageable);
 
-        assertFalse(
-                response.content()
-                        .stream()
-                        .anyMatch(exercise ->
-                                exercise.translations()
-                                        .stream()
-                                        .anyMatch(translation ->
-                                                "Private Press".equals(
-                                                        translation.name()
-                                                )
-                                        )
-                        )
-        );
+                assertEquals(3, response.totalElements());
+                assertEquals(3, response.content().size());
 
-        assertFalse(
-                response.content()
-                        .stream()
-                        .anyMatch(exercise ->
-                                exercise.translations()
-                                        .stream()
-                                        .anyMatch(translation ->
-                                                "Deleted Exercise".equals(
-                                                        translation.name()
-                                                )
-                                        )
-                        )
-        );
-    }
+                assertTrue(
+                                response.content()
+                                                .stream()
+                                                .anyMatch(exercise -> exercise.translations()
+                                                                .stream()
+                                                                .anyMatch(translation -> "Press Bench".equals(
+                                                                                translation.name()))));
 
-    @Test
-    void shouldSearchExercisesByName() {
-        Pageable pageable = PageRequest.of(0, 20);
+                assertTrue(
+                                response.content()
+                                                .stream()
+                                                .anyMatch(exercise -> exercise.translations()
+                                                                .stream()
+                                                                .anyMatch(translation -> "My Custom Press".equals(
+                                                                                translation.name()))));
 
-        ExercisePageResponse response =
-                exerciseService.getAvailableExercises(
-                        userA,
-                        "press",
-                        null,
-                        null,
-                        null,
-                        null,
-                        pageable
-                );
+                assertFalse(
+                                response.content()
+                                                .stream()
+                                                .anyMatch(exercise -> exercise.translations()
+                                                                .stream()
+                                                                .anyMatch(translation -> "Private Press".equals(
+                                                                                translation.name()))));
 
-        assertEquals(2, response.totalElements());
+                assertFalse(
+                                response.content()
+                                                .stream()
+                                                .anyMatch(exercise -> exercise.translations()
+                                                                .stream()
+                                                                .anyMatch(translation -> "Deleted Exercise".equals(
+                                                                                translation.name()))));
+        }
 
-        assertTrue(
-                response.content()
-                        .stream()
-                        .allMatch(exercise ->
-                                exercise.translations()
-                                        .stream()
-                                        .anyMatch(translation ->
-                                                translation.name() != null
-                                                        && translation.name()
-                                                        .toLowerCase()
-                                                        .contains("press")
-                                        )
-                        )
-        );
-    }
+        @Test
+        void shouldSearchExercisesByName() {
 
-    @Test
-    void shouldFilterExercisesByEquipment() {
-        Pageable pageable = PageRequest.of(0, 20);
+                Pageable pageable = PageRequest.of(0, 20);
 
-        ExercisePageResponse response =
-                exerciseService.getAvailableExercises(
-                        userA,
-                        null,
-                        null,
-                        "barbell",
-                        null,
-                        null,
-                        pageable
-                );
+                ExercisePageResponse response = exerciseService.getAvailableExercises(
+                                userA,
+                                "press",
+                                null,
+                                null,
+                                null,
+                                null,
+                                pageable);
 
-        assertEquals(2, response.totalElements());
-    }
+                assertEquals(2, response.totalElements());
 
-    @Test
-    void shouldCombineSearchAndFilters() {
-        Pageable pageable = PageRequest.of(0, 20);
+                assertTrue(
+                                response.content()
+                                                .stream()
+                                                .allMatch(exercise -> exercise.translations()
+                                                                .stream()
+                                                                .anyMatch(translation -> translation.name() != null
+                                                                                && translation.name()
+                                                                                                .toLowerCase()
+                                                                                                .contains("press"))));
+        }
 
-        ExercisePageResponse response =
-                exerciseService.getAvailableExercises(
-                        userA,
-                        "press",
-                        "strength",
-                        "barbell",
-                        null,
-                        null,
-                        pageable
-                );
+        @Test
+        void shouldFilterExercisesByEquipment() {
 
-        assertEquals(1, response.totalElements());
+                Pageable pageable = PageRequest.of(0, 20);
 
-        assertEquals(
-                "Press Bench",
-                response.content()
-                        .getFirst()
-                        .translations()
-                        .stream()
-                        .filter(translation ->
-                                translation.name() != null
-                        )
-                        .findFirst()
-                        .orElseThrow()
-                        .name()
-        );
-    }
+                ExercisePageResponse response = exerciseService.getAvailableExercises(
+                                userA,
+                                null,
+                                null,
+                                "barbell",
+                                null,
+                                null,
+                                pageable);
 
-    @Test
-    void shouldRespectPagination() {
-        Pageable pageable = PageRequest.of(0, 2);
+                assertEquals(2, response.totalElements());
+        }
 
-        ExercisePageResponse response =
-                exerciseService.getAvailableExercises(
-                        userA,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        pageable
-                );
+        @Test
+        void shouldCombineSearchAndFilters() {
 
-        assertEquals(3, response.totalElements());
-        assertEquals(2, response.content().size());
-        assertEquals(2, response.size());
-        assertEquals(2, response.totalPages());
-    }
+                Pageable pageable = PageRequest.of(0, 20);
 
-    private UUID createUser() {
-        User user = new User();
+                ExercisePageResponse response = exerciseService.getAvailableExercises(
+                                userA,
+                                "press",
+                                "strength",
+                                "barbell",
+                                null,
+                                null,
+                                pageable);
 
-        user.setId(UUID.randomUUID());
-        user.setEmail(UUID.randomUUID() + "@test.com");
-        user.setPasswordHash("test-password");
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
+                assertEquals(1, response.totalElements());
 
-        return userRepository.save(user).getId();
-    }
+                assertEquals(
+                                "Press Bench",
+                                response.content()
+                                                .getFirst()
+                                                .translations()
+                                                .stream()
+                                                .filter(translation -> translation.name() != null)
+                                                .findFirst()
+                                                .orElseThrow()
+                                                .name());
+        }
 
-    private Exercise createExercise(
-            UUID ownerId,
-            String name,
-            String muscleGroup,
-            String equipment,
-            String source
-    ) {
-        Exercise exercise = new Exercise();
+        @Test
+        void shouldRespectPagination() {
 
-        exercise.setId(UUID.randomUUID());
-        exercise.setOwnerId(ownerId);
-        exercise.setSource(source);
-        exercise.setSourceId(UUID.randomUUID().toString());
-        exercise.setCategory("strength");
-        exercise.setEquipment(equipment);
-        exercise.setTargetMuscle(muscleGroup);
-        exercise.setMuscleGroup(muscleGroup);
-        exercise.setSecondaryMuscles(new String[0]);
-        exercise.setCreatedAt(LocalDateTime.now());
-        exercise.setUpdatedAt(LocalDateTime.now());
+                Pageable pageable = PageRequest.of(0, 2);
 
-        Exercise savedExercise = exerciseRepository.save(exercise);
+                ExercisePageResponse response = exerciseService.getAvailableExercises(
+                                userA,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                pageable);
 
-        ExerciseTranslation translation =
-                new ExerciseTranslation();
+                assertEquals(3, response.totalElements());
+                assertEquals(2, response.content().size());
+                assertEquals(2, response.size());
+                assertEquals(2, response.totalPages());
+        }
 
-        translation.setId(UUID.randomUUID());
-        translation.setExerciseId(savedExercise.getId());
-        translation.setLanguage("en");
-        translation.setName(name);
-        translation.setInstructions("Test instructions");
+        @Test
+        void shouldRejectRequestWithoutJwt() throws Exception {
 
-        translationRepository.save(translation);
+                mockMvc.perform(
+                                get("/api/exercises"))
+                                .andExpect(status().isUnauthorized());
+        }
 
-        return savedExercise;
-    }
+        @Test
+        void shouldAllowRequestWithValidJwt() throws Exception {
+
+                String token = jwtService.generateToken(userA);
+
+                mockMvc.perform(
+                                get("/api/exercises")
+                                                .header(
+                                                                "Authorization",
+                                                                "Bearer " + token))
+                                .andExpect(status().isOk());
+        }
+
+        @Test
+        void shouldRejectRequestWithInvalidJwt() throws Exception {
+
+                mockMvc.perform(
+                                get("/api/exercises")
+                                                .header(
+                                                                "Authorization",
+                                                                "Bearer invalid-token"))
+                                .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void shouldOnlyReturnGlobalAndOwnExercises() throws Exception {
+                String token = jwtService.generateToken(userA);
+
+                String response = mockMvc.perform(
+                                get("/api/exercises")
+                                .header("Authorization", "Bearer " + token))
+                                .andExpect(status().isOk())
+                                .andReturn()
+                                .getResponse()
+                                .getContentAsString();
+
+                assertTrue(response.contains("Press Bench"));
+                assertTrue(response.contains("My Custom Press"));
+                assertFalse(response.contains("Private Press"));
+                assertFalse(response.contains("Deleted Exercise"));
+        }
+
+        private UUID createUser() {
+
+                User user = new User();
+
+                user.setId(UUID.randomUUID());
+
+                user.setEmail(
+                                UUID.randomUUID() + "@test.com");
+
+                user.setPasswordHash(
+                                passwordEncoder.encode("test-password"));
+
+                LocalDateTime now = LocalDateTime.now();
+
+                user.setCreatedAt(now);
+                user.setUpdatedAt(now);
+
+                return userRepository.save(user).getId();
+        }
+
+        private Exercise createExercise(
+                        UUID ownerId,
+                        String name,
+                        String muscleGroup,
+                        String equipment,
+                        String source) {
+
+                Exercise exercise = new Exercise();
+
+                exercise.setId(UUID.randomUUID());
+                exercise.setOwnerId(ownerId);
+                exercise.setSource(source);
+                exercise.setSourceId(UUID.randomUUID().toString());
+                exercise.setCategory("strength");
+                exercise.setEquipment(equipment);
+                exercise.setTargetMuscle(muscleGroup);
+                exercise.setMuscleGroup(muscleGroup);
+                exercise.setSecondaryMuscles(new String[0]);
+
+                LocalDateTime now = LocalDateTime.now();
+
+                exercise.setCreatedAt(now);
+                exercise.setUpdatedAt(now);
+
+                Exercise savedExercise = exerciseRepository.save(exercise);
+
+                ExerciseTranslation translation = new ExerciseTranslation();
+
+                translation.setId(UUID.randomUUID());
+                translation.setExerciseId(savedExercise.getId());
+                translation.setLanguage("en");
+                translation.setName(name);
+                translation.setInstructions("Test instructions");
+
+                translationRepository.save(translation);
+
+                return savedExercise;
+        }
 }
