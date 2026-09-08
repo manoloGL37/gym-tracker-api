@@ -1,19 +1,22 @@
 package dev.manuel.gymtracker_api.config;
 
-import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
-import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
-import dev.manuel.gymtracker_api.user.exception.EmailAlreadyExistsException;
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.stream.Collectors;
+import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
+import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
+import dev.manuel.gymtracker_api.user.exception.EmailAlreadyExistsException;
+import jakarta.validation.ConstraintViolationException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -36,14 +39,37 @@ public class GlobalExceptionHandler {
                                 .getFieldErrors()
                                 .stream()
                                 .collect(Collectors.toMap(
-                                                error -> error.getField(),
-                                                error -> error.getDefaultMessage()));
+                                error -> error.getField(),
+                                error -> error.getDefaultMessage(),
+                                (first, second) -> first
+                        ));
 
                 return new ValidationErrorResponse(
                                 HttpStatus.BAD_REQUEST.value(),
                                 "VALIDATION_ERROR",
                                 errors,
                                 LocalDateTime.now());
+        }
+
+        @ExceptionHandler(ConstraintViolationException.class)
+        @ResponseStatus(HttpStatus.BAD_REQUEST)
+        public ValidationErrorResponse handleConstraintViolation(
+                ConstraintViolationException exception
+        ) {
+        Map<String, String> errors = exception.getConstraintViolations()
+                .stream()
+                .collect(Collectors.toMap(
+                        violation -> violation.getPropertyPath().toString(),
+                        violation -> violation.getMessage(),
+                        (first, second) -> first
+                ));
+
+        return new ValidationErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "VALIDATION_ERROR",
+                errors,
+                LocalDateTime.now()
+        );
         }
 
         @ExceptionHandler(ResourceNotFoundException.class)
@@ -86,6 +112,24 @@ public class GlobalExceptionHandler {
                 return ResponseEntity
                                 .status(HttpStatus.UNAUTHORIZED)
                                 .body(response);
+        }
+
+        @ExceptionHandler(HandlerMethodValidationException.class)
+        @ResponseStatus(HttpStatus.BAD_REQUEST)
+        public ValidationErrorResponse handleMethodValidation(
+                HandlerMethodValidationException exception
+        ) {
+        Map<String, String> errors = Map.of(
+                "parameters",
+                "One or more parameters have invalid values"
+        );
+
+        return new ValidationErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "VALIDATION_ERROR",
+                errors,
+                LocalDateTime.now()
+        );
         }
 
         public record ValidationErrorResponse(
