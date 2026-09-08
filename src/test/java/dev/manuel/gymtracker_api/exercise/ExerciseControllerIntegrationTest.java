@@ -1,14 +1,14 @@
 package dev.manuel.gymtracker_api.exercise;
 
-import dev.manuel.gymtracker_api.auth.security.JwtService;
-import dev.manuel.gymtracker_api.exercise.dto.ExercisePageResponse;
-import dev.manuel.gymtracker_api.exercise.model.Exercise;
-import dev.manuel.gymtracker_api.exercise.model.ExerciseTranslation;
-import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
-import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationRepository;
-import dev.manuel.gymtracker_api.exercise.service.ExerciseService;
-import dev.manuel.gymtracker_api.user.model.User;
-import dev.manuel.gymtracker_api.user.repository.UserRepository;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,13 +23,19 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.data.domain.Sort;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
+import dev.manuel.gymtracker_api.auth.security.JwtService;
+import dev.manuel.gymtracker_api.exercise.dto.ExercisePageResponse;
+import dev.manuel.gymtracker_api.exercise.dto.ExerciseResponse;
+import dev.manuel.gymtracker_api.exercise.model.Exercise;
+import dev.manuel.gymtracker_api.exercise.model.ExerciseTranslation;
+import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
+import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationRepository;
+import dev.manuel.gymtracker_api.exercise.service.ExerciseService;
+import dev.manuel.gymtracker_api.user.model.User;
+import dev.manuel.gymtracker_api.user.repository.UserRepository;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @Testcontainers
 @SpringBootTest
@@ -279,6 +285,82 @@ class ExerciseControllerIntegrationTest {
         }
 
         @Test
+        void shouldReturnExercisesOrderedByCreationDateDescending() {
+        Exercise oldest = createExercise(
+                null,
+                "Order Test Oldest",
+                "legs",
+                "barbell",
+                "ORDER_TEST"
+        );
+
+        Exercise middle = createExercise(
+                null,
+                "Order Test Middle",
+                "legs",
+                "barbell",
+                "ORDER_TEST"
+        );
+
+        Exercise newest = createExercise(
+                null,
+                "Order Test Newest",
+                "legs",
+                "barbell",
+                "ORDER_TEST"
+        );
+
+        LocalDateTime now = LocalDateTime.now();
+
+        oldest.setCreatedAt(now.minusDays(2));
+        middle.setCreatedAt(now.minusDays(1));
+        newest.setCreatedAt(now);
+
+        exerciseRepository.save(oldest);
+        exerciseRepository.save(middle);
+        exerciseRepository.save(newest);
+
+        Pageable pageable = PageRequest.of(0, 20);
+
+        ExercisePageResponse response =
+                exerciseService.getAvailableExercises(
+                        userA,
+                        "Order Test",
+                        null,
+                        null,
+                        null,
+                        null,
+                        pageable
+                );
+
+        assertEquals(3, response.totalElements());
+
+        assertEquals(
+                "Order Test Newest",
+                response.content().get(0)
+                        .translations()
+                        .getFirst()
+                        .name()
+        );
+
+        assertEquals(
+                "Order Test Middle",
+                response.content().get(1)
+                        .translations()
+                        .getFirst()
+                        .name()
+        );
+
+        assertEquals(
+                "Order Test Oldest",
+                response.content().get(2)
+                        .translations()
+                        .getFirst()
+                        .name()
+        );
+        }
+
+        @Test
         void shouldRejectRequestWithoutJwt() throws Exception {
 
                 mockMvc.perform(
@@ -326,6 +408,42 @@ class ExerciseControllerIntegrationTest {
                 assertTrue(response.contains("My Custom Press"));
                 assertFalse(response.contains("Private Press"));
                 assertFalse(response.contains("Deleted Exercise"));
+        }
+
+        @Test
+        void shouldRejectNegativePage() throws Exception {
+        String token = jwtService.generateToken(userA);
+
+        mockMvc.perform(
+                get("/api/exercises")
+                        .param("page", "-1")
+                        .header("Authorization", "Bearer " + token)
+        )
+                .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void shouldRejectZeroSize() throws Exception {
+        String token = jwtService.generateToken(userA);
+
+        mockMvc.perform(
+                get("/api/exercises")
+                        .param("size", "0")
+                        .header("Authorization", "Bearer " + token)
+        )
+                .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        void shouldRejectSizeAboveMaximum() throws Exception {
+        String token = jwtService.generateToken(userA);
+
+        mockMvc.perform(
+                get("/api/exercises")
+                        .param("size", "101")
+                        .header("Authorization", "Bearer " + token)
+        )
+                .andExpect(status().isBadRequest());
         }
 
         private UUID createUser() {

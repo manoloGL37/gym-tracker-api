@@ -11,10 +11,13 @@ import dev.manuel.gymtracker_api.exercise.repository.ExerciseAliasRepository;
 import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
 import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationRepository;
 import dev.manuel.gymtracker_api.exercise.specification.ExerciseSpecification;
+
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.Sort;
 
 import java.util.List;
 import java.util.Map;
@@ -47,6 +50,7 @@ public class ExerciseService {
             String targetMuscle,
             Pageable pageable
     ) {
+
         Specification<Exercise> specification =
                 ExerciseSpecification.availableForUser(userId);
 
@@ -80,10 +84,19 @@ public class ExerciseService {
             );
         }
 
+        Pageable sortedPageable = PageRequest.of(
+                pageable.getPageNumber(),
+                pageable.getPageSize(),
+                Sort.by(
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.asc("id")
+                )
+        );
+
         Page<Exercise> exercisePage =
                 exerciseRepository.findAll(
                         specification,
-                        pageable
+                        sortedPageable
                 );
 
         if (exercisePage.isEmpty()) {
@@ -149,6 +162,7 @@ public class ExerciseService {
             List<ExerciseTranslation> translations,
             List<ExerciseAlias> aliases
     ) {
+
         List<ExerciseTranslationResponse> translationResponses =
                 translations.stream()
                         .map(translation ->
