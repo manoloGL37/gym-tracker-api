@@ -48,10 +48,6 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/api/auth/login"
                         ).permitAll()
-                        .requestMatchers(
-                                HttpMethod.GET,
-                                "/api/users/**"
-                        ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(exception ->

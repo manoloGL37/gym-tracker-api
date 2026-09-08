@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -26,8 +27,9 @@ public class UserController {
         return userService.createUser(request);
     }
 
-    @GetMapping("/{id}")
-    public UserResponse getUserById(@PathVariable UUID id) {
-        return userService.getUserById(id);
+    @GetMapping("/me")
+    public UserResponse getCurrentUser(
+            @AuthenticationPrincipal UUID userId) {
+        return userService.getUserById(userId);
     }
 }
