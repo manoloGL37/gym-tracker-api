@@ -150,6 +150,19 @@ public class GlobalExceptionHandler {
                 LocalDateTime.now());
         }
 
+        @ExceptionHandler(IllegalArgumentException.class)
+        @ResponseStatus(HttpStatus.BAD_REQUEST)
+        public ErrorResponse handleIllegalArgumentException(
+                IllegalArgumentException exception
+        ) {
+        return new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "INVALID_REQUEST",
+                exception.getMessage(),
+                LocalDateTime.now()
+        );
+        }
+
         public record ValidationErrorResponse(
                         int status,
                         String code,
