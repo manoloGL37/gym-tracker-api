@@ -1,0 +1,2 @@
+ALTER TABLE routines
+ADD COLUMN deleted_at TIMESTAMP;
