@@ -15,6 +15,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
 import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
+import dev.manuel.gymtracker_api.routine.exception.DuplicateRoutineExercisePositionException;
 import dev.manuel.gymtracker_api.user.exception.EmailAlreadyExistsException;
 import jakarta.validation.ConstraintViolationException;
 
@@ -39,10 +40,9 @@ public class GlobalExceptionHandler {
                                 .getFieldErrors()
                                 .stream()
                                 .collect(Collectors.toMap(
-                                error -> error.getField(),
-                                error -> error.getDefaultMessage(),
-                                (first, second) -> first
-                        ));
+                                                error -> error.getField(),
+                                                error -> error.getDefaultMessage(),
+                                                (first, second) -> first));
 
                 return new ValidationErrorResponse(
                                 HttpStatus.BAD_REQUEST.value(),
@@ -54,22 +54,19 @@ public class GlobalExceptionHandler {
         @ExceptionHandler(ConstraintViolationException.class)
         @ResponseStatus(HttpStatus.BAD_REQUEST)
         public ValidationErrorResponse handleConstraintViolation(
-                ConstraintViolationException exception
-        ) {
-        Map<String, String> errors = exception.getConstraintViolations()
-                .stream()
-                .collect(Collectors.toMap(
-                        violation -> violation.getPropertyPath().toString(),
-                        violation -> violation.getMessage(),
-                        (first, second) -> first
-                ));
+                        ConstraintViolationException exception) {
+                Map<String, String> errors = exception.getConstraintViolations()
+                                .stream()
+                                .collect(Collectors.toMap(
+                                                violation -> violation.getPropertyPath().toString(),
+                                                violation -> violation.getMessage(),
+                                                (first, second) -> first));
 
-        return new ValidationErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                "VALIDATION_ERROR",
-                errors,
-                LocalDateTime.now()
-        );
+                return new ValidationErrorResponse(
+                                HttpStatus.BAD_REQUEST.value(),
+                                "VALIDATION_ERROR",
+                                errors,
+                                LocalDateTime.now());
         }
 
         @ExceptionHandler(ResourceNotFoundException.class)
@@ -117,19 +114,27 @@ public class GlobalExceptionHandler {
         @ExceptionHandler(HandlerMethodValidationException.class)
         @ResponseStatus(HttpStatus.BAD_REQUEST)
         public ValidationErrorResponse handleMethodValidation(
-                HandlerMethodValidationException exception
-        ) {
-        Map<String, String> errors = Map.of(
-                "parameters",
-                "One or more parameters have invalid values"
-        );
+                        HandlerMethodValidationException exception) {
+                Map<String, String> errors = Map.of(
+                                "parameters",
+                                "One or more parameters have invalid values");
 
-        return new ValidationErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                "VALIDATION_ERROR",
-                errors,
-                LocalDateTime.now()
-        );
+                return new ValidationErrorResponse(
+                                HttpStatus.BAD_REQUEST.value(),
+                                "VALIDATION_ERROR",
+                                errors,
+                                LocalDateTime.now());
+        }
+
+        @ExceptionHandler(DuplicateRoutineExercisePositionException.class)
+        @ResponseStatus(HttpStatus.BAD_REQUEST)
+        public ErrorResponse handleDuplicateRoutineExercisePosition(
+                        DuplicateRoutineExercisePositionException exception) {
+                return new ErrorResponse(
+                                HttpStatus.BAD_REQUEST.value(),
+                                "DUPLICATE_EXERCISE_POSITION",
+                                exception.getMessage(),
+                                LocalDateTime.now());
         }
 
         public record ValidationErrorResponse(
