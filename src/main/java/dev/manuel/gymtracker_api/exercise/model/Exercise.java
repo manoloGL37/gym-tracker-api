@@ -1,15 +1,17 @@
 package dev.manuel.gymtracker_api.exercise.model;
 
+import java.time.LocalDateTime;
+import java.util.UUID;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
-import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Entity
 @Table(name = "exercises")
@@ -24,8 +26,9 @@ public class Exercise {
     @Column(name = "owner_id")
     private UUID ownerId;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
-    private String source;
+    private ExerciseSource source;
 
     @Column(name = "source_id", length = 255)
     private String sourceId;

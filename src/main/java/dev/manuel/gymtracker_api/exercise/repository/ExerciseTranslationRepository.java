@@ -10,4 +10,6 @@ public interface ExerciseTranslationRepository
         extends JpaRepository<ExerciseTranslation, UUID> {
 
     List<ExerciseTranslation> findByExerciseIdIn(List<UUID> exerciseIds);
+
+    List<ExerciseTranslation> findByExerciseId(UUID exerciseId);
 }

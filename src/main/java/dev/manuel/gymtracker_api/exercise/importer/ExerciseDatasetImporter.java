@@ -1,6 +1,7 @@
 package dev.manuel.gymtracker_api.exercise.importer;
 
 import dev.manuel.gymtracker_api.exercise.model.Exercise;
+import dev.manuel.gymtracker_api.exercise.model.ExerciseSource;
 import dev.manuel.gymtracker_api.exercise.model.ExerciseTranslation;
 import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
 import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationRepository;
@@ -19,7 +20,8 @@ import org.slf4j.LoggerFactory;
 @Component
 public class ExerciseDatasetImporter {
 
-    private static final String SOURCE = "EXERCISES_DATASET";
+    private static final ExerciseSource SOURCE =
+        ExerciseSource.EXERCISES_DATASET;
 
     private static final Logger logger =
             LoggerFactory.getLogger(ExerciseDatasetImporter.class);
@@ -155,11 +157,7 @@ public class ExerciseDatasetImporter {
                 );
             }
 
-            translation.setName(
-                    language.equals("en")
-                            ? item.name()
-                            : null
-            );
+            translation.setName(item.name());
 
             translation.setInstructions(instructions);
 

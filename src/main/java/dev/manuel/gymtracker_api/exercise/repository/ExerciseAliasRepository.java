@@ -10,4 +10,6 @@ public interface ExerciseAliasRepository
         extends JpaRepository<ExerciseAlias, UUID> {
 
     List<ExerciseAlias> findByExerciseIdIn(List<UUID> exerciseIds);
+
+    List<ExerciseAlias> findByExerciseId(UUID exerciseId);
 }

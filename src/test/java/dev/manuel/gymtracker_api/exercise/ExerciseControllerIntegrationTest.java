@@ -2,7 +2,9 @@ package dev.manuel.gymtracker_api.exercise;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,7 +37,16 @@ import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationReposito
 import dev.manuel.gymtracker_api.exercise.service.ExerciseService;
 import dev.manuel.gymtracker_api.user.model.User;
 import dev.manuel.gymtracker_api.user.repository.UserRepository;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
+import static org.hamcrest.Matchers.hasSize;
+
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+
+import dev.manuel.gymtracker_api.exercise.model.ExerciseSource;
 
 @Testcontainers
 @SpringBootTest
@@ -108,28 +119,28 @@ class ExerciseControllerIntegrationTest {
                                 "Press Bench",
                                 "chest",
                                 "barbell",
-                                "EXERCISES_DATASET");
+                                ExerciseSource.EXERCISES_DATASET);
 
                 createExercise(
                                 userA,
                                 "My Custom Press",
                                 "chest",
                                 "dumbbell",
-                                "USER");
+                                ExerciseSource.USER);
 
                 createExercise(
                                 userB,
                                 "Private Press",
                                 "chest",
                                 "barbell",
-                                "USER");
+                                ExerciseSource.USER);
 
                 Exercise deletedExercise = createExercise(
                                 null,
                                 "Deleted Exercise",
                                 "chest",
                                 "barbell",
-                                "EXERCISES_DATASET");
+                                ExerciseSource.EXERCISES_DATASET);
 
                 deletedExercise.setDeletedAt(LocalDateTime.now());
                 exerciseRepository.save(deletedExercise);
@@ -139,7 +150,7 @@ class ExerciseControllerIntegrationTest {
                                 "Back Squat",
                                 "legs",
                                 "barbell",
-                                "EXERCISES_DATASET");
+                                ExerciseSource.EXERCISES_DATASET);
         }
 
         @Test
@@ -286,78 +297,70 @@ class ExerciseControllerIntegrationTest {
 
         @Test
         void shouldReturnExercisesOrderedByCreationDateDescending() {
-        Exercise oldest = createExercise(
-                null,
-                "Order Test Oldest",
-                "legs",
-                "barbell",
-                "ORDER_TEST"
-        );
+                Exercise oldest = createExercise(
+                                null,
+                                "Order Test Oldest",
+                                "legs",
+                                "barbell",
+                                ExerciseSource.EXERCISES_DATASET);
 
-        Exercise middle = createExercise(
-                null,
-                "Order Test Middle",
-                "legs",
-                "barbell",
-                "ORDER_TEST"
-        );
+                Exercise middle = createExercise(
+                                null,
+                                "Order Test Middle",
+                                "legs",
+                                "barbell",
+                                ExerciseSource.EXERCISES_DATASET);
 
-        Exercise newest = createExercise(
-                null,
-                "Order Test Newest",
-                "legs",
-                "barbell",
-                "ORDER_TEST"
-        );
+                Exercise newest = createExercise(
+                                null,
+                                "Order Test Newest",
+                                "legs",
+                                "barbell",
+                                ExerciseSource.EXERCISES_DATASET);
 
-        LocalDateTime now = LocalDateTime.now();
+                LocalDateTime now = LocalDateTime.now();
 
-        oldest.setCreatedAt(now.minusDays(2));
-        middle.setCreatedAt(now.minusDays(1));
-        newest.setCreatedAt(now);
+                oldest.setCreatedAt(now.minusDays(2));
+                middle.setCreatedAt(now.minusDays(1));
+                newest.setCreatedAt(now);
 
-        exerciseRepository.save(oldest);
-        exerciseRepository.save(middle);
-        exerciseRepository.save(newest);
+                exerciseRepository.save(oldest);
+                exerciseRepository.save(middle);
+                exerciseRepository.save(newest);
 
-        Pageable pageable = PageRequest.of(0, 20);
+                Pageable pageable = PageRequest.of(0, 20);
 
-        ExercisePageResponse response =
-                exerciseService.getAvailableExercises(
-                        userA,
-                        "Order Test",
-                        null,
-                        null,
-                        null,
-                        null,
-                        pageable
-                );
+                ExercisePageResponse response = exerciseService.getAvailableExercises(
+                                userA,
+                                "Order Test",
+                                null,
+                                null,
+                                null,
+                                null,
+                                pageable);
 
-        assertEquals(3, response.totalElements());
+                assertEquals(3, response.totalElements());
 
-        assertEquals(
-                "Order Test Newest",
-                response.content().get(0)
-                        .translations()
-                        .getFirst()
-                        .name()
-        );
+                assertEquals(
+                                "Order Test Newest",
+                                response.content().get(0)
+                                                .translations()
+                                                .getFirst()
+                                                .name());
 
-        assertEquals(
-                "Order Test Middle",
-                response.content().get(1)
-                        .translations()
-                        .getFirst()
-                        .name()
-        );
+                assertEquals(
+                                "Order Test Middle",
+                                response.content().get(1)
+                                                .translations()
+                                                .getFirst()
+                                                .name());
 
-        assertEquals(
-                "Order Test Oldest",
-                response.content().get(2)
-                        .translations()
-                        .getFirst()
-                        .name()
-        );
+                assertEquals(
+                                "Order Test Oldest",
+                                response.content().get(2)
+                                                .translations()
+                                                .getFirst()
+                                                .name());
         }
 
         @Test
@@ -398,7 +401,7 @@ class ExerciseControllerIntegrationTest {
 
                 String response = mockMvc.perform(
                                 get("/api/exercises")
-                                .header("Authorization", "Bearer " + token))
+                                                .header("Authorization", "Bearer " + token))
                                 .andExpect(status().isOk())
                                 .andReturn()
                                 .getResponse()
@@ -412,38 +415,35 @@ class ExerciseControllerIntegrationTest {
 
         @Test
         void shouldRejectNegativePage() throws Exception {
-        String token = jwtService.generateToken(userA);
+                String token = jwtService.generateToken(userA);
 
-        mockMvc.perform(
-                get("/api/exercises")
-                        .param("page", "-1")
-                        .header("Authorization", "Bearer " + token)
-        )
-                .andExpect(status().isBadRequest());
+                mockMvc.perform(
+                                get("/api/exercises")
+                                                .param("page", "-1")
+                                                .header("Authorization", "Bearer " + token))
+                                .andExpect(status().isBadRequest());
         }
 
         @Test
         void shouldRejectZeroSize() throws Exception {
-        String token = jwtService.generateToken(userA);
+                String token = jwtService.generateToken(userA);
 
-        mockMvc.perform(
-                get("/api/exercises")
-                        .param("size", "0")
-                        .header("Authorization", "Bearer " + token)
-        )
-                .andExpect(status().isBadRequest());
+                mockMvc.perform(
+                                get("/api/exercises")
+                                                .param("size", "0")
+                                                .header("Authorization", "Bearer " + token))
+                                .andExpect(status().isBadRequest());
         }
 
         @Test
         void shouldRejectSizeAboveMaximum() throws Exception {
-        String token = jwtService.generateToken(userA);
+                String token = jwtService.generateToken(userA);
 
-        mockMvc.perform(
-                get("/api/exercises")
-                        .param("size", "101")
-                        .header("Authorization", "Bearer " + token)
-        )
-                .andExpect(status().isBadRequest());
+                mockMvc.perform(
+                                get("/api/exercises")
+                                                .param("size", "101")
+                                                .header("Authorization", "Bearer " + token))
+                                .andExpect(status().isBadRequest());
         }
 
         private UUID createUser() {
@@ -471,7 +471,7 @@ class ExerciseControllerIntegrationTest {
                         String name,
                         String muscleGroup,
                         String equipment,
-                        String source) {
+                        ExerciseSource source) {
 
                 Exercise exercise = new Exercise();
 
@@ -503,5 +503,286 @@ class ExerciseControllerIntegrationTest {
                 translationRepository.save(translation);
 
                 return savedExercise;
+        }
+
+        @Test
+        void shouldCreatePrivateExercise() throws Exception {
+
+                String token = jwtService.generateToken(userA);
+
+                String request = """
+                                {
+                                        "category": "strength",
+                                        "equipment": "barbell",
+                                        "targetMuscle": "chest",
+                                        "muscleGroup": "chest",
+                                        "secondaryMuscles": ["triceps", "shoulders"],
+                                        "translations": [
+                                        {
+                                                "language": "en",
+                                                "name": "My Bench Press",
+                                                "instructions": "Press the bar upward."
+                                        },
+                                        {
+                                                "language": "es",
+                                                "name": "Mi Press de Banca",
+                                                "instructions": "Empuja la barra hacia arriba."
+                                        }
+                                        ]
+                                }
+                                """;
+
+                mockMvc.perform(
+                                post("/api/exercises")
+                                                .header(
+                                                                HttpHeaders.AUTHORIZATION,
+                                                                "Bearer " + token)
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(request))
+                                .andExpect(status().isCreated())
+                                .andExpect(jsonPath("$.id").exists())
+                                .andExpect(jsonPath("$.category").value("strength"))
+                                .andExpect(jsonPath("$.equipment").value("barbell"))
+                                .andExpect(jsonPath("$.targetMuscle").value("chest"))
+                                .andExpect(jsonPath("$.muscleGroup").value("chest"))
+                                .andExpect(jsonPath("$.translations", hasSize(2)))
+                                .andExpect(jsonPath("$.translations[0].name").value("My Bench Press"))
+                                .andExpect(jsonPath("$.translations[1].name").value("Mi Press de Banca"));
+        }
+
+        @Test
+        void shouldUpdateOwnPrivateExercise() throws Exception {
+
+                Exercise exercise = createExercise(
+                                userA,
+                                "My Bench Press",
+                                "chest",
+                                "barbell",
+                                ExerciseSource.USER);
+
+                String token = jwtService.generateToken(userA);
+
+                String request = """
+                                {
+                                    "category": "strength",
+                                    "equipment": "dumbbell",
+                                    "targetMuscle": "chest",
+                                    "muscleGroup": "chest",
+                                    "secondaryMuscles": ["triceps"],
+                                    "translations": [
+                                        {
+                                            "language": "en",
+                                            "name": "Updated Bench Press",
+                                            "instructions": "New instructions"
+                                        }
+                                    ]
+                                }
+                                """;
+
+                mockMvc.perform(
+                                put("/api/exercises/{id}", exercise.getId())
+                                                .header(
+                                                                HttpHeaders.AUTHORIZATION,
+                                                                "Bearer " + token)
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(request))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.id")
+                                                .value(exercise.getId().toString()))
+                                .andExpect(jsonPath("$.equipment")
+                                                .value("dumbbell"))
+                                .andExpect(jsonPath("$.translations[0].name")
+                                                .value("Updated Bench Press"))
+                                .andExpect(jsonPath("$.translations[0].instructions")
+                                                .value("New instructions"));
+        }
+
+        @Test
+        void shouldNotUpdateAnotherUsersExercise() throws Exception {
+
+                Exercise exercise = createExercise(
+                                userB,
+                                "Private Exercise",
+                                "back",
+                                "barbell",
+                                ExerciseSource.USER);
+
+                String token = jwtService.generateToken(userA);
+
+                String request = """
+                                {
+                                    "category": "strength",
+                                    "equipment": "dumbbell",
+                                    "targetMuscle": "back",
+                                    "muscleGroup": "back",
+                                    "translations": [
+                                        {
+                                            "language": "en",
+                                            "name": "Hacked Exercise",
+                                            "instructions": "Should not update"
+                                        }
+                                    ]
+                                }
+                                """;
+
+                mockMvc.perform(
+                                put("/api/exercises/{id}", exercise.getId())
+                                                .header(
+                                                                HttpHeaders.AUTHORIZATION,
+                                                                "Bearer " + token)
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(request))
+                                .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void shouldNotUpdateGlobalExercise() throws Exception {
+
+                Exercise exercise = createExercise(
+                                null,
+                                "Global Bench Press",
+                                "chest",
+                                "barbell",
+                                ExerciseSource.EXERCISES_DATASET);
+
+                String token = jwtService.generateToken(userA);
+
+                String request = """
+                                {
+                                    "category": "strength",
+                                    "equipment": "dumbbell",
+                                    "targetMuscle": "chest",
+                                    "muscleGroup": "chest",
+                                    "translations": [
+                                        {
+                                            "language": "en",
+                                            "name": "Modified Global Exercise",
+                                            "instructions": "Should not update"
+                                        }
+                                    ]
+                                }
+                                """;
+
+                mockMvc.perform(
+                                put("/api/exercises/{id}", exercise.getId())
+                                                .header(
+                                                                HttpHeaders.AUTHORIZATION,
+                                                                "Bearer " + token)
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(request))
+                                .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void shouldRejectExerciseUpdateWithoutJwt() throws Exception {
+
+                Exercise exercise = createExercise(
+                                userA,
+                                "My Exercise",
+                                "chest",
+                                "barbell",
+                                ExerciseSource.USER);
+
+                String request = """
+                                {
+                                    "category": "strength",
+                                    "equipment": "dumbbell",
+                                    "targetMuscle": "chest",
+                                    "muscleGroup": "chest",
+                                    "translations": [
+                                        {
+                                            "language": "en",
+                                            "name": "Updated Exercise",
+                                            "instructions": "Updated"
+                                        }
+                                    ]
+                                }
+                                """;
+
+                mockMvc.perform(
+                                put("/api/exercises/{id}", exercise.getId())
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(request))
+                                .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void shouldDeleteOwnPrivateExercise() throws Exception {
+
+                Exercise exercise = createExercise(
+                                userA,
+                                "My Exercise",
+                                "chest",
+                                "barbell",
+                                ExerciseSource.USER);
+
+                String token = jwtService.generateToken(userA);
+
+                mockMvc.perform(
+                                delete("/api/exercises/{id}", exercise.getId())
+                                                .header(
+                                                                HttpHeaders.AUTHORIZATION,
+                                                                "Bearer " + token))
+                                .andExpect(status().isNoContent());
+
+                Exercise deletedExercise = exerciseRepository.findById(exercise.getId())
+                                .orElseThrow();
+
+                assertNotNull(deletedExercise.getDeletedAt());
+        }
+
+        @Test
+        void shouldNotDeleteAnotherUsersExercise() throws Exception {
+
+                Exercise exercise = createExercise(
+                                userB,
+                                "Private Exercise",
+                                "back",
+                                "barbell",
+                                ExerciseSource.USER);
+
+                String token = jwtService.generateToken(userA);
+
+                mockMvc.perform(
+                                delete("/api/exercises/{id}", exercise.getId())
+                                                .header(
+                                                                HttpHeaders.AUTHORIZATION,
+                                                                "Bearer " + token))
+                                .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void shouldNotDeleteGlobalExercise() throws Exception {
+
+                Exercise exercise = createExercise(
+                                null,
+                                "Global Exercise",
+                                "chest",
+                                "barbell",
+                                ExerciseSource.EXERCISES_DATASET);
+
+                String token = jwtService.generateToken(userA);
+
+                mockMvc.perform(
+                                delete("/api/exercises/{id}", exercise.getId())
+                                                .header(
+                                                                HttpHeaders.AUTHORIZATION,
+                                                                "Bearer " + token))
+                                .andExpect(status().isNotFound());
+        }
+
+        @Test
+        void shouldRejectExerciseDeletionWithoutJwt() throws Exception {
+
+                Exercise exercise = createExercise(
+                                userA,
+                                "My Exercise",
+                                "chest",
+                                "barbell",
+                                ExerciseSource.USER);
+
+                mockMvc.perform(
+                                delete("/api/exercises/{id}", exercise.getId()))
+                                .andExpect(status().isUnauthorized());
         }
 }
