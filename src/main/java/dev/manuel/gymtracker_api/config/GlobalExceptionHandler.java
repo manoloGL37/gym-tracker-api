@@ -17,6 +17,7 @@ import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
 import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
 import dev.manuel.gymtracker_api.routine.exception.DuplicateRoutineExercisePositionException;
 import dev.manuel.gymtracker_api.user.exception.EmailAlreadyExistsException;
+import dev.manuel.gymtracker_api.workout.exception.DuplicateWorkoutSetNumberException;
 import jakarta.validation.ConstraintViolationException;
 
 @RestControllerAdvice
@@ -135,6 +136,18 @@ public class GlobalExceptionHandler {
                                 "DUPLICATE_EXERCISE_POSITION",
                                 exception.getMessage(),
                                 LocalDateTime.now());
+        }
+
+        @ExceptionHandler(DuplicateWorkoutSetNumberException.class)
+        @ResponseStatus(HttpStatus.BAD_REQUEST)
+        public ErrorResponse handleDuplicateWorkoutSetNumber(
+                DuplicateWorkoutSetNumberException exception) {
+
+        return new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "DUPLICATE_WORKOUT_SET_NUMBER",
+                exception.getMessage(),
+                LocalDateTime.now());
         }
 
         public record ValidationErrorResponse(

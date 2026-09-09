@@ -1704,113 +1704,107 @@ class RoutineControllerIntegrationTest {
     }
 
     @Test
-void shouldNotIncludeDeletedRoutineInList() throws Exception {
+    void shouldNotIncludeDeletedRoutineInList() throws Exception {
 
-    String token = jwtService.generateToken(userA);
+        String token = jwtService.generateToken(userA);
 
-    createRoutine(token, "Rutina que permanece");
+        createRoutine(token, "Rutina que permanece");
 
-    createRoutine(token, "Rutina que se elimina");
+        createRoutine(token, "Rutina que se elimina");
 
-    Routine routineToDelete = routineRepository.findAll()
-            .stream()
-            .filter(r ->
-                    r.getUserId().equals(userA)
-                            && r.getName().equals("Rutina que se elimina"))
-            .findFirst()
-            .orElseThrow();
+        Routine routineToDelete = routineRepository.findAll()
+                .stream()
+                .filter(r -> r.getUserId().equals(userA)
+                        && r.getName().equals("Rutina que se elimina"))
+                .findFirst()
+                .orElseThrow();
 
-    mockMvc.perform(
-            delete("/api/routines/{id}", routineToDelete.getId())
-                    .header("Authorization", "Bearer " + token)
-    ).andExpect(status().isNoContent());
+        mockMvc.perform(
+                delete("/api/routines/{id}", routineToDelete.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNoContent());
 
-    mockMvc.perform(
-            get("/api/routines")
-                    .header("Authorization", "Bearer " + token)
-    )
-    .andExpect(status().isOk())
-    .andExpect(jsonPath("$.content", hasSize(1)))
-    .andExpect(jsonPath("$.content[0].name")
-            .value("Rutina que permanece"));
-}
+        mockMvc.perform(
+                get("/api/routines")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].name")
+                        .value("Rutina que permanece"));
+    }
 
-@Test
-void shouldRejectDeletingAnotherUsersRoutine() throws Exception {
+    @Test
+    void shouldRejectDeletingAnotherUsersRoutine() throws Exception {
 
-    String tokenA = jwtService.generateToken(userA);
-    String tokenB = jwtService.generateToken(userB);
+        String tokenA = jwtService.generateToken(userA);
+        String tokenB = jwtService.generateToken(userB);
 
-    createRoutine(tokenA, "Rutina de usuario A");
+        createRoutine(tokenA, "Rutina de usuario A");
 
-    Routine routine = routineRepository.findAll()
-            .stream()
-            .filter(r ->
-                    r.getUserId().equals(userA)
-                            && r.getName().equals("Rutina de usuario A"))
-            .findFirst()
-            .orElseThrow();
+        Routine routine = routineRepository.findAll()
+                .stream()
+                .filter(r -> r.getUserId().equals(userA)
+                        && r.getName().equals("Rutina de usuario A"))
+                .findFirst()
+                .orElseThrow();
 
-    mockMvc.perform(
-            delete("/api/routines/{id}", routine.getId())
-                    .header("Authorization", "Bearer " + tokenB)
-    ).andExpect(status().isNotFound());
+        mockMvc.perform(
+                delete("/api/routines/{id}", routine.getId())
+                        .header("Authorization", "Bearer " + tokenB))
+                .andExpect(status().isNotFound());
 
-    Routine persistedRoutine =
-            routineRepository.findById(routine.getId())
-                    .orElseThrow();
+        Routine persistedRoutine = routineRepository.findById(routine.getId())
+                .orElseThrow();
 
-    assertThat(persistedRoutine.getDeletedAt())
-            .isNull();
-}
+        assertThat(persistedRoutine.getDeletedAt())
+                .isNull();
+    }
 
-@Test
-void shouldRejectDeletingNonExistingRoutine() throws Exception {
+    @Test
+    void shouldRejectDeletingNonExistingRoutine() throws Exception {
 
-    String token = jwtService.generateToken(userA);
+        String token = jwtService.generateToken(userA);
 
-    UUID nonExistingRoutineId = UUID.randomUUID();
+        UUID nonExistingRoutineId = UUID.randomUUID();
 
-    mockMvc.perform(
-            delete("/api/routines/{id}", nonExistingRoutineId)
-                    .header("Authorization", "Bearer " + token)
-    ).andExpect(status().isNotFound());
-}
+        mockMvc.perform(
+                delete("/api/routines/{id}", nonExistingRoutineId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+    }
 
-@Test
-void shouldRejectDeletingRoutineWithoutAuthentication() throws Exception {
+    @Test
+    void shouldRejectDeletingRoutineWithoutAuthentication() throws Exception {
 
-    UUID routineId = UUID.randomUUID();
+        UUID routineId = UUID.randomUUID();
 
-    mockMvc.perform(
-            delete("/api/routines/{id}", routineId)
-    ).andExpect(status().isUnauthorized());
-}
+        mockMvc.perform(
+                delete("/api/routines/{id}", routineId)).andExpect(status().isUnauthorized());
+    }
 
-@Test
-void shouldRejectDeletingAlreadyDeletedRoutine() throws Exception {
+    @Test
+    void shouldRejectDeletingAlreadyDeletedRoutine() throws Exception {
 
-    String token = jwtService.generateToken(userA);
+        String token = jwtService.generateToken(userA);
 
-    createRoutine(token, "Rutina para eliminar dos veces");
+        createRoutine(token, "Rutina para eliminar dos veces");
 
-    Routine routine = routineRepository.findAll()
-            .stream()
-            .filter(r ->
-                    r.getUserId().equals(userA)
-                            && r.getName()
-                            .equals("Rutina para eliminar dos veces"))
-            .findFirst()
-            .orElseThrow();
+        Routine routine = routineRepository.findAll()
+                .stream()
+                .filter(r -> r.getUserId().equals(userA)
+                        && r.getName()
+                                .equals("Rutina para eliminar dos veces"))
+                .findFirst()
+                .orElseThrow();
 
-    mockMvc.perform(
-            delete("/api/routines/{id}", routine.getId())
-                    .header("Authorization", "Bearer " + token)
-    ).andExpect(status().isNoContent());
+        mockMvc.perform(
+                delete("/api/routines/{id}", routine.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNoContent());
 
-    mockMvc.perform(
-            delete("/api/routines/{id}", routine.getId())
-                    .header("Authorization", "Bearer " + token)
-    ).andExpect(status().isNotFound());
-}
+        mockMvc.perform(
+                delete("/api/routines/{id}", routine.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+    }
 }
