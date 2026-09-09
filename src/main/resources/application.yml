@@ -1,12 +1,15 @@
 spring:
-    application:
-        name: gymtracker-api
+  application:
+    name: gymtracker-api
 
-    datasource:
-        url: jdbc:postgresql://localhost:5433/gymtracker
-        username: gymtracker
-        password: gymtracker
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/gymtracker}
+    username: ${SPRING_DATASOURCE_USERNAME:gymtracker}
+    password: ${SPRING_DATASOURCE_PASSWORD:gymtracker}
 
 jwt:
-    secret: ${JWT_SECRET}
-    expiration: 3600000
+  secret: ${JWT_SECRET}
+  expiration: 3600000
+
+server:
+  port: ${PORT:8080}
