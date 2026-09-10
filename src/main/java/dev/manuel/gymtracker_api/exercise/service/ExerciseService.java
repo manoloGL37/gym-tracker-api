@@ -167,6 +167,7 @@ public class ExerciseService {
                 exercise.setOwnerId(userId);
                 exercise.setSource(ExerciseSource.USER);
                 exercise.setSourceId(null);
+                exercise.setClientId(request.clientId());
                 exercise.setCategory(request.category());
                 exercise.setEquipment(request.equipment());
                 exercise.setTargetMuscle(request.targetMuscle());
@@ -180,6 +181,19 @@ public class ExerciseService {
                 exercise.setCreatedAt(now);
                 exercise.setUpdatedAt(now);
                 exercise.setDeletedAt(null);
+
+                if (request.clientId() != null) {
+                        Exercise existingExercise = exerciseRepository
+                                        .findByOwnerIdAndClientId(userId, request.clientId())
+                                        .orElse(null);
+
+                        if (existingExercise != null) {
+                                return toResponse(
+                                                existingExercise,
+                                                translationRepository.findByExerciseId(existingExercise.getId()),
+                                                aliasRepository.findByExerciseId(existingExercise.getId()));
+                        }
+                }
 
                 Exercise savedExercise = exerciseRepository.save(exercise);
 
@@ -312,6 +326,11 @@ public class ExerciseService {
 
                 return new ExerciseResponse(
                                 exercise.getId(),
+                                exercise.getClientId(),
+                                exercise.getSource(),
+                                exercise.getSourceId(),
+                                exercise.getOwnerId() != null,
+                                exercise.getOwnerId() != null,
                                 exercise.getCategory(),
                                 exercise.getEquipment(),
                                 exercise.getTargetMuscle(),

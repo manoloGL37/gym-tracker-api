@@ -33,6 +33,9 @@ public class Exercise {
     @Column(name = "source_id", length = 255)
     private String sourceId;
 
+    @Column(name = "client_id")
+    private UUID clientId;
+
     @Column(length = 100)
     private String category;
 

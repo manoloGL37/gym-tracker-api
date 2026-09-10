@@ -20,4 +20,6 @@ public interface WorkoutRepository
             UUID id,
             UUID userId
     );
+
+    Optional<Workout> findByUserIdAndClientId(UUID userId, UUID clientId);
 }

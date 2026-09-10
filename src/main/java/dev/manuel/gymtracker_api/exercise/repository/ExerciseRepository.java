@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ExerciseRepository
@@ -31,4 +32,6 @@ public interface ExerciseRepository
                 ExerciseSource source,
                 List<String> sourceIds
         );
+
+    Optional<Exercise> findByOwnerIdAndClientId(UUID ownerId, UUID clientId);
 }

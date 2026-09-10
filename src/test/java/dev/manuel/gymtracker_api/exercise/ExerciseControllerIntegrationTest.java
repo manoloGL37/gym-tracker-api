@@ -446,6 +446,35 @@ class ExerciseControllerIntegrationTest {
                                 .andExpect(status().isBadRequest());
         }
 
+        @Test
+        void shouldCreateCustomExerciseIdempotentlyAndExposeItsCapabilities() throws Exception {
+                UUID clientId = UUID.randomUUID();
+                long exercisesBefore = exerciseRepository.count();
+                String request = """
+                                {
+                                  "clientId": "%s",
+                                  "category": "strength",
+                                  "translations": [{ "language": "en", "name": "Imported exercise" }]
+                                }
+                                """.formatted(clientId);
+                String token = jwtService.generateToken(userA);
+
+                for (int attempt = 0; attempt < 2; attempt++) {
+                        mockMvc.perform(post("/api/exercises")
+                                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(request))
+                                        .andExpect(status().isCreated())
+                                        .andExpect(jsonPath("$.clientId").value(clientId.toString()))
+                                        .andExpect(jsonPath("$.source").value("USER"))
+                                        .andExpect(jsonPath("$.editable").value(true))
+                                        .andExpect(jsonPath("$.deletable").value(true));
+                }
+
+                assertEquals(exercisesBefore + 1, exerciseRepository.count());
+                assertTrue(exerciseRepository.findByOwnerIdAndClientId(userA, clientId).isPresent());
+        }
+
         private UUID createUser() {
 
                 User user = new User();

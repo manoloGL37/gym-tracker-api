@@ -24,6 +24,9 @@ public class WorkoutSet {
     @Column(name = "workout_exercise_id", nullable = false)
     private UUID workoutExerciseId;
 
+    @Column(name = "client_id")
+    private UUID clientId;
+
     @Column(name = "set_number", nullable = false)
     private int setNumber;
 

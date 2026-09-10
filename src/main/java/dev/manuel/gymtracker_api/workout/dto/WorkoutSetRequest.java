@@ -6,8 +6,11 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 public record WorkoutSetRequest(
+
+        UUID clientId,
 
         @Min(1)
         int setNumber,

@@ -87,8 +87,7 @@ public class StatisticsController {
     @GetMapping("/exercises/{exerciseId}")
     @Operation(summary = "Get exercise statistics", description = "Returns performance statistics for one exercise in the requested date range.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Exercise statistics"),
-            @ApiResponse(responseCode = "404", description = "Exercise not found")
+            @ApiResponse(responseCode = "200", description = "Exercise statistics, including zero-valued aggregates when no matching data exists")
     })
     public ExerciseStatisticsResponse getExerciseStatistics(
             @AuthenticationPrincipal UUID userId,

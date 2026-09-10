@@ -5,6 +5,7 @@ import java.util.UUID;
 
 public record WorkoutSetResponse(
         UUID id,
+        UUID clientId,
         int setNumber,
         BigDecimal weight,
         int reps,
