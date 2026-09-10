@@ -1,167 +1,91 @@
 package dev.manuel.gymtracker_api.exercise.importer;
 
-import dev.manuel.gymtracker_api.exercise.model.Exercise;
-import dev.manuel.gymtracker_api.exercise.model.ExerciseSource;
-import dev.manuel.gymtracker_api.exercise.model.ExerciseTranslation;
-import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
-import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationRepository;
-import jakarta.transaction.Transactional;
-import org.springframework.stereotype.Component;
-
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 @Component
-public class ExerciseDatasetImporter {
+@ConditionalOnProperty(
+        name = "gymtracker.import.exercises",
+        havingValue = "true"
+)
+public class ExerciseDatasetImporter implements ApplicationRunner {
 
-    private static final ExerciseSource SOURCE =
-        ExerciseSource.EXERCISES_DATASET;
+    private static final int BATCH_SIZE = 100;
 
     private static final Logger logger =
             LoggerFactory.getLogger(ExerciseDatasetImporter.class);
 
     private final ExerciseDatasetReader reader;
-    private final ExerciseRepository exerciseRepository;
-    private final ExerciseTranslationRepository translationRepository;
+    private final ExerciseDatasetBatchImporter batchImporter;
 
     public ExerciseDatasetImporter(
             ExerciseDatasetReader reader,
-            ExerciseRepository exerciseRepository,
-            ExerciseTranslationRepository translationRepository
+            ExerciseDatasetBatchImporter batchImporter
     ) {
         this.reader = reader;
-        this.exerciseRepository = exerciseRepository;
-        this.translationRepository = translationRepository;
+        this.batchImporter = batchImporter;
     }
 
-    @Transactional
-    public void importDataset() {
+    @Override
+    public void run(ApplicationArguments args) {
+
+        logger.info(">>> EXERCISE DATASET IMPORT STARTING <<<");
+
         List<ExerciseDatasetItem> items = reader.read();
 
-        List<String> sourceIds = items.stream()
-                .map(ExerciseDatasetItem::id)
-                .toList();
+        logger.info(
+                "Dataset loaded: {} exercises",
+                items.size()
+        );
 
-        List<Exercise> existingExercises =
-                exerciseRepository.findBySourceAndSourceIdIn(
-                        SOURCE,
-                        sourceIds
-                );
+        int totalBatches =
+                (int) Math.ceil((double) items.size() / BATCH_SIZE);
 
-        Map<String, Exercise> exercisesBySourceId =
-                new HashMap<>();
+        int totalImported = 0;
 
-        for (Exercise exercise : existingExercises) {
-            exercisesBySourceId.put(
-                    exercise.getSourceId(),
-                    exercise
+        for (int start = 0; start < items.size(); start += BATCH_SIZE) {
+
+            int end = Math.min(
+                    start + BATCH_SIZE,
+                    items.size()
+            );
+
+            int batchNumber =
+                    (start / BATCH_SIZE) + 1;
+
+            List<ExerciseDatasetItem> batch =
+                    items.subList(start, end);
+
+            logger.info(
+                    "Starting batch {}/{}: exercises {}-{}",
+                    batchNumber,
+                    totalBatches,
+                    start + 1,
+                    end
+            );
+
+            int imported =
+                    batchImporter.importBatch(batch);
+
+            totalImported += imported;
+
+            logger.info(
+                    "Batch {}/{} completed successfully: {} exercises",
+                    batchNumber,
+                    totalBatches,
+                    imported
             );
         }
 
         logger.info(
-            "Exercise dataset imported successfully: {} exercises",
-            items.size()
+                "Exercise dataset imported successfully: {} exercises",
+                totalImported
         );
-
-        List<UUID> existingExerciseIds = existingExercises.stream()
-                .map(Exercise::getId)
-                .toList();
-
-        List<ExerciseTranslation> existingTranslations =
-                existingExerciseIds.isEmpty()
-                        ? List.of()
-                        : translationRepository.findByExerciseIdIn(
-                                existingExerciseIds
-                        );
-
-        Map<String, ExerciseTranslation> translationsByExerciseAndLanguage =
-                new HashMap<>();
-
-        for (ExerciseTranslation translation : existingTranslations) {
-            String key = translation.getExerciseId()
-                    + ":" + translation.getLanguage();
-
-            translationsByExerciseAndLanguage.put(
-                    key,
-                    translation
-            );
-        }
-
-        LocalDateTime now = LocalDateTime.now();
-
-        for (ExerciseDatasetItem item : items) {
-            Exercise exercise = exercisesBySourceId.get(item.id());
-
-            if (exercise == null) {
-                exercise = new Exercise();
-                exercise.setId(UUID.randomUUID());
-                exercise.setOwnerId(null);
-                exercise.setSource(SOURCE);
-                exercise.setSourceId(item.id());
-                exercise.setCreatedAt(now);
-
-                exercisesBySourceId.put(item.id(), exercise);
-            }
-
-            exercise.setCategory(item.category());
-            exercise.setEquipment(item.equipment());
-            exercise.setTargetMuscle(item.target());
-            exercise.setMuscleGroup(item.muscle_group());
-            exercise.setSecondaryMuscles(item.secondary_muscles());
-            exercise.setUpdatedAt(now);
-            exercise.setDeletedAt(null);
-
-            Exercise savedExercise =
-                    exerciseRepository.save(exercise);
-
-            importTranslations(
-                    savedExercise,
-                    item,
-                    translationsByExerciseAndLanguage
-            );
-        }
-    }
-
-    private void importTranslations(
-            Exercise exercise,
-            ExerciseDatasetItem item,
-            Map<String, ExerciseTranslation> translationsByExerciseAndLanguage
-    ) {
-        for (Map.Entry<String, String> entry :
-                item.instructions().entrySet()) {
-
-            String language = entry.getKey();
-            String instructions = entry.getValue();
-
-            String key = exercise.getId()
-                    + ":" + language;
-
-            ExerciseTranslation translation =
-                    translationsByExerciseAndLanguage.get(key);
-
-            if (translation == null) {
-                translation = new ExerciseTranslation();
-                translation.setId(UUID.randomUUID());
-                translation.setExerciseId(exercise.getId());
-                translation.setLanguage(language);
-
-                translationsByExerciseAndLanguage.put(
-                        key,
-                        translation
-                );
-            }
-
-            translation.setName(item.name());
-
-            translation.setInstructions(instructions);
-
-            translationRepository.save(translation);
-        }
     }
 }
