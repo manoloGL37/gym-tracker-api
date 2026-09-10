@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public record WorkoutResponse(
         UUID id,
+        UUID clientId,
         UUID routineId,
         LocalDateTime startedAt,
         LocalDateTime completedAt,

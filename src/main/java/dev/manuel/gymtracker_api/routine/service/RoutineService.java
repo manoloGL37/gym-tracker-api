@@ -50,6 +50,18 @@ public class RoutineService {
         validateExercisesBelongToUser(
                 userId,
                 request.exercises());
+        validateExercisePositions(request.exercises());
+
+        if (request.clientId() != null) {
+            Routine existingRoutine = routineRepository
+                    .findByUserIdAndClientId(userId, request.clientId())
+                    .orElse(null);
+
+            if (existingRoutine != null) {
+                return toResponse(existingRoutine, routineExerciseRepository
+                        .findByRoutineIdOrderByPositionAsc(existingRoutine.getId()));
+            }
+        }
 
         LocalDateTime now = LocalDateTime.now();
 
@@ -57,6 +69,7 @@ public class RoutineService {
 
         routine.setId(UUID.randomUUID());
         routine.setUserId(userId);
+        routine.setClientId(request.clientId());
         routine.setName(request.name());
         routine.setDescription(request.description());
         routine.setCreatedAt(now);
@@ -112,6 +125,7 @@ public class RoutineService {
                 .findByUserIdAndDeletedAtIsNull(userId, sortedPageable)
                 .map(routine -> new RoutineSummaryResponse(
                         routine.getId(),
+                        routine.getClientId(),
                         routine.getName(),
                         routine.getDescription(),
                         routine.getCreatedAt(),
@@ -263,6 +277,7 @@ public void deleteRoutine(
 
         return new RoutineResponse(
                 routine.getId(),
+                routine.getClientId(),
                 routine.getName(),
                 routine.getDescription(),
                 exerciseResponses,

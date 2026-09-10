@@ -109,6 +109,7 @@ Flyway applies pending migrations at startup. Normal startup does not import the
 | `SPRING_DATASOURCE_PASSWORD` | PostgreSQL password | `gymtracker` |
 | `JWT_SECRET` | Secret used to sign JWTs | Required |
 | `PORT` | HTTP server port | `8080` |
+| `APP_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API (no paths and no trailing slash), for example `http://localhost:4200,https://gym-tracker-eight-dun.vercel.app` | `http://localhost:4200,https://gym-tracker-eight-dun.vercel.app` |
 
 Never commit production credentials or JWT secrets. Production configuration is supplied through the deployment environment.
 
@@ -166,4 +167,6 @@ The production deployment is intentionally simple:
 GitHub → Render Web Service → Neon PostgreSQL
 ```
 
-Render runs the Spring Boot application and connects to Neon using deployment environment variables. No production URL or credentials are stored in this repository.
+Render runs the Spring Boot application and connects to Neon using deployment environment variables. No production credentials are stored in this repository.
+
+The current production API URL is <https://gym-tracker-api-s70k.onrender.com>. The deployed frontend origin is `https://gym-tracker-eight-dun.vercel.app`; it is included in the default CORS policy. Configure additional/replacement origins through `APP_CORS_ALLOWED_ORIGINS`; do not use `*`.

@@ -19,6 +19,11 @@ public interface WorkoutSetRepository
             UUID workoutExerciseId
     );
 
+    Optional<WorkoutSet> findByWorkoutExerciseIdAndClientId(
+            UUID workoutExerciseId,
+            UUID clientId
+    );
+
     List<WorkoutSet> findByWorkoutExerciseIdInOrderByWorkoutExerciseIdAscSetNumberAsc(
             List<UUID> workoutExerciseIds
     );

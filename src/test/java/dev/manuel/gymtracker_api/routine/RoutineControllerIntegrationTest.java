@@ -549,6 +549,28 @@ class RoutineControllerIntegrationTest {
                         status().isUnauthorized());
     }
 
+    @Test
+    void shouldCreateRoutineIdempotently() throws Exception {
+        UUID clientId = UUID.randomUUID();
+        String token = jwtService.generateToken(userA);
+        long routinesBefore = routineRepository.count();
+        String request = """
+                { "clientId": "%s", "name": "Imported routine", "exercises": [] }
+                """.formatted(clientId);
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/routines")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(request))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.clientId").value(clientId.toString()));
+        }
+
+        assertThat(routineRepository.count()).isEqualTo(routinesBefore + 1);
+        assertThat(routineRepository.findByUserIdAndClientId(userA, clientId)).isPresent();
+    }
+
     private User createUser(String email) {
 
         User user = new User();

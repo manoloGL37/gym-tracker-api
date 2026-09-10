@@ -68,14 +68,35 @@ public class WorkoutService {
                                                 "Routine",
                                                 request.routineId()));
 
+                if (request.clientId() != null) {
+                        Workout existingWorkout = workoutRepository
+                                        .findByUserIdAndClientId(userId, request.clientId())
+                                        .orElse(null);
+
+                        if (existingWorkout != null) {
+                                return toResponse(existingWorkout, workoutExerciseRepository
+                                                .findByWorkoutIdOrderByPositionAsc(existingWorkout.getId()));
+                        }
+                }
+
                 LocalDateTime now = LocalDateTime.now();
+                LocalDateTime startedAt = request.startedAt() != null
+                                ? request.startedAt()
+                                : now;
+
+                if (request.completedAt() != null && request.completedAt().isBefore(startedAt)) {
+                        throw new IllegalArgumentException("completedAt must not be before startedAt");
+                }
 
                 Workout workout = new Workout();
 
                 workout.setId(UUID.randomUUID());
                 workout.setUserId(userId);
+                workout.setClientId(request.clientId());
                 workout.setRoutineId(routine.getId());
-                workout.setStartedAt(now);
+                workout.setStartedAt(startedAt);
+                workout.setCompletedAt(request.completedAt());
+                workout.setNotes(request.notes());
                 workout.setCreatedAt(now);
 
                 Workout savedWorkout = workoutRepository.save(workout);
@@ -126,6 +147,16 @@ public class WorkoutService {
                                         workoutExerciseId);
                 }
 
+                if (request.clientId() != null) {
+                        WorkoutSet existingSet = workoutSetRepository
+                                        .findByWorkoutExerciseIdAndClientId(workoutExerciseId, request.clientId())
+                                        .orElse(null);
+
+                        if (existingSet != null) {
+                                return toSetResponse(existingSet);
+                        }
+                }
+
                 boolean setAlreadyExists = workoutSetRepository
                                 .existsByWorkoutExerciseIdAndSetNumber(
                                                 workoutExerciseId,
@@ -140,6 +171,7 @@ public class WorkoutService {
 
                 workoutSet.setId(UUID.randomUUID());
                 workoutSet.setWorkoutExerciseId(workoutExerciseId);
+                workoutSet.setClientId(request.clientId());
                 workoutSet.setSetNumber(request.setNumber());
                 workoutSet.setWeight(request.weight());
                 workoutSet.setReps(request.reps());
@@ -252,6 +284,7 @@ public class WorkoutService {
 
                 return new WorkoutSetResponse(
                                 workoutSet.getId(),
+                                workoutSet.getClientId(),
                                 workoutSet.getSetNumber(),
                                 workoutSet.getWeight(),
                                 workoutSet.getReps(),
@@ -298,6 +331,7 @@ public class WorkoutService {
 
                 return new WorkoutResponse(
                                 workout.getId(),
+                                workout.getClientId(),
                                 workout.getRoutineId(),
                                 workout.getStartedAt(),
                                 workout.getCompletedAt(),

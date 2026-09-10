@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -39,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -51,6 +54,13 @@ class WorkoutControllerIntegrationTest {
     @Container
     static PostgreSQLContainer<?> postgres =
             new PostgreSQLContainer<>("postgres:17");
+
+    @DynamicPropertySource
+    static void configureDatasource(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -1762,6 +1772,90 @@ class WorkoutControllerIntegrationTest {
     // -------------------------------------------------------------------------
     // HELPERS
     // -------------------------------------------------------------------------
+
+    @Test
+    void shouldAllowOnlyConfiguredCorsOriginsForPreflight() throws Exception {
+        mockMvc.perform(options("/api/workouts")
+                        .header("Origin", "http://localhost:4200")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "authorization,content-type"))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertEquals("http://localhost:4200",
+                        result.getResponse().getHeader("Access-Control-Allow-Origin")));
+
+        mockMvc.perform(options("/api/workouts")
+                        .header("Origin", "https://gym-tracker-eight-dun.vercel.app")
+                        .header("Access-Control-Request-Method", "POST"))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertEquals("https://gym-tracker-eight-dun.vercel.app",
+                        result.getResponse().getHeader("Access-Control-Allow-Origin")));
+
+        mockMvc.perform(options("/api/workouts")
+                        .header("Origin", "https://untrusted.example")
+                        .header("Access-Control-Request-Method", "POST"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void shouldImportHistoricalWorkoutIdempotently() throws Exception {
+        User user = createUser("historical-import@test.com");
+        UUID exerciseId = createExercise(user.getId(), "Bench Press");
+        Routine routine = createRoutine(user.getId(), "Historical routine", null);
+        createRoutineExercise(routine.getId(), exerciseId, 0, 3, 10, 90, null);
+
+        UUID clientId = UUID.randomUUID();
+        String request = """
+                {
+                  "clientId": "%s",
+                  "routineId": "%s",
+                  "startedAt": "2024-06-01T10:00:00",
+                  "completedAt": "2024-06-01T11:15:00",
+                  "notes": "Imported from local storage"
+                }
+                """.formatted(clientId, routine.getId());
+        String token = jwtService.generateToken(user.getId());
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/workouts")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(request))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.clientId").value(clientId.toString()))
+                    .andExpect(jsonPath("$.startedAt").value("2024-06-01T10:00:00"))
+                    .andExpect(jsonPath("$.completedAt").value("2024-06-01T11:15:00"))
+                    .andExpect(jsonPath("$.notes").value("Imported from local storage"));
+        }
+
+        assertEquals(1, workoutRepository.count());
+    }
+
+    @Test
+    void shouldImportWorkoutSetIdempotently() throws Exception {
+        User user = createUser("set-import@test.com");
+        UUID exerciseId = createExercise(user.getId(), "Row");
+        Routine routine = createRoutine(user.getId(), "Set import", null);
+        Workout workout = createWorkout(user.getId(), routine.getId());
+        WorkoutExercise workoutExercise = createWorkoutExercise(
+                workout.getId(), exerciseId, 0, null);
+        UUID clientId = UUID.randomUUID();
+        String request = """
+                { "clientId": "%s", "setNumber": 1, "weight": 60.00, "reps": 10, "rpe": 8.0 }
+                """.formatted(clientId);
+        String token = jwtService.generateToken(user.getId());
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/workouts/{workoutId}/exercises/{workoutExerciseId}/sets",
+                            workout.getId(), workoutExercise.getId())
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(request))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.clientId").value(clientId.toString()));
+        }
+
+        assertEquals(1, workoutSetRepository.count());
+    }
 
     private User createUser(String email) {
         User user = new User();

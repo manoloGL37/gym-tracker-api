@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public record RoutineResponse(
         UUID id,
+        UUID clientId,
         String name,
         String description,
         List<RoutineExerciseResponse> exercises,

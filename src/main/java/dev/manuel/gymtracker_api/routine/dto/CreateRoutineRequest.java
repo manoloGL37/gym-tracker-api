@@ -5,8 +5,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
+import java.util.UUID;
 
 public record CreateRoutineRequest(
+
+        UUID clientId,
 
         @NotBlank
         @Size(max = 150)
@@ -16,6 +19,7 @@ public record CreateRoutineRequest(
         String description,
 
         @Size(max = 50)
+        @jakarta.validation.constraints.NotNull
         List<@Valid RoutineExerciseRequest> exercises
 
 ) {}
