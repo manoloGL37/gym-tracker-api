@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
@@ -91,6 +93,7 @@ public class GlobalExceptionHandler {
                                 LocalDateTime.now());
         }
 
+        @Schema(name = "ApiError", description = "Error returned for domain and request failures.")
         public record ErrorResponse(
                         int status,
                         String code,
@@ -163,6 +166,7 @@ public class GlobalExceptionHandler {
         );
         }
 
+        @Schema(name = "ValidationError", description = "Validation error keyed by field or parameter name.")
         public record ValidationErrorResponse(
                         int status,
                         String code,

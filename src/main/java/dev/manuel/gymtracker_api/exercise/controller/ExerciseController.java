@@ -4,6 +4,11 @@ import dev.manuel.gymtracker_api.exercise.dto.CreateExerciseRequest;
 import dev.manuel.gymtracker_api.exercise.dto.ExercisePageResponse;
 import dev.manuel.gymtracker_api.exercise.dto.ExerciseResponse;
 import dev.manuel.gymtracker_api.exercise.service.ExerciseService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -31,6 +36,9 @@ import java.util.UUID;
 @Validated
 @RestController
 @RequestMapping("/api/exercises")
+@Tag(name = "Exercises", description = "Global exercise catalog and user-owned custom exercises.")
+@SecurityRequirement(name = "bearerAuth")
+@ApiResponse(responseCode = "401", description = "Missing or invalid JWT")
 public class ExerciseController {
 
     private final ExerciseService exerciseService;
@@ -40,6 +48,8 @@ public class ExerciseController {
     }
 
     @GetMapping("/{id}")
+    @Operation(summary = "Get an exercise")
+    @ApiResponse(responseCode = "404", description = "Exercise not found")
     public ExerciseResponse getExerciseById(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {
@@ -48,6 +58,11 @@ public class ExerciseController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Create a custom exercise")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Exercise created"),
+            @ApiResponse(responseCode = "400", description = "Invalid request payload")
+    })
     public ExerciseResponse createExercise(
             @AuthenticationPrincipal UUID userId,
             @Valid @RequestBody CreateExerciseRequest request) {
@@ -55,6 +70,12 @@ public class ExerciseController {
     }
 
     @PutMapping("/{id}")
+    @Operation(summary = "Update a custom exercise")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Exercise updated"),
+            @ApiResponse(responseCode = "400", description = "Invalid request payload"),
+            @ApiResponse(responseCode = "404", description = "Exercise not found")
+    })
     public ExerciseResponse updateExercise(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id,
@@ -66,6 +87,8 @@ public class ExerciseController {
     }
 
     @GetMapping
+    @Operation(summary = "List available exercises", description = "Returns global exercises and the authenticated user's custom exercises with optional filters and pagination.")
+    @ApiResponse(responseCode = "200", description = "Paginated exercise catalog")
     public ExercisePageResponse getExercises(
             @AuthenticationPrincipal UUID userId,
             @RequestParam(required = false) String search,
@@ -89,6 +112,11 @@ public class ExerciseController {
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(summary = "Delete a custom exercise")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Exercise deleted"),
+            @ApiResponse(responseCode = "404", description = "Exercise not found")
+    })
     public void deleteExercise(
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {

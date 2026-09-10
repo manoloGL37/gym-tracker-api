@@ -5,6 +5,11 @@ import dev.manuel.gymtracker_api.statistics.dto.StatisticsComparisonResponse;
 import dev.manuel.gymtracker_api.statistics.dto.StatisticsEvolutionResponse;
 import dev.manuel.gymtracker_api.statistics.dto.StatisticsSummaryResponse;
 import dev.manuel.gymtracker_api.statistics.service.StatisticsService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +23,9 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/statistics")
+@Tag(name = "Statistics", description = "Training metrics for the authenticated user.")
+@SecurityRequirement(name = "bearerAuth")
+@ApiResponse(responseCode = "401", description = "Missing or invalid JWT")
 public class StatisticsController {
 
     private final StatisticsService statisticsService;
@@ -28,6 +36,8 @@ public class StatisticsController {
     }
 
     @GetMapping("/summary")
+    @Operation(summary = "Get a training summary", description = "Aggregates workout metrics for an inclusive date range.")
+    @ApiResponse(responseCode = "200", description = "Training summary")
     public StatisticsSummaryResponse getSummary(
             @AuthenticationPrincipal UUID userId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -39,6 +49,8 @@ public class StatisticsController {
     }
 
     @GetMapping("/comparison")
+    @Operation(summary = "Compare training periods")
+    @ApiResponse(responseCode = "200", description = "Comparison between two date ranges")
     public StatisticsComparisonResponse getComparison(
             @AuthenticationPrincipal UUID userId,
 
@@ -58,6 +70,8 @@ public class StatisticsController {
     }
 
     @GetMapping("/evolution")
+    @Operation(summary = "Get training evolution", description = "Returns metrics over the requested date range.")
+    @ApiResponse(responseCode = "200", description = "Training evolution")
     public StatisticsEvolutionResponse getEvolution(
             @AuthenticationPrincipal UUID userId,
 
@@ -71,6 +85,11 @@ public class StatisticsController {
     }
 
     @GetMapping("/exercises/{exerciseId}")
+    @Operation(summary = "Get exercise statistics", description = "Returns performance statistics for one exercise in the requested date range.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Exercise statistics"),
+            @ApiResponse(responseCode = "404", description = "Exercise not found")
+    })
     public ExerciseStatisticsResponse getExerciseStatistics(
             @AuthenticationPrincipal UUID userId,
 
