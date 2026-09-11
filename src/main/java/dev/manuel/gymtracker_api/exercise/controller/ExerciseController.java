@@ -2,6 +2,7 @@ package dev.manuel.gymtracker_api.exercise.controller;
 
 import dev.manuel.gymtracker_api.exercise.dto.CreateExerciseRequest;
 import dev.manuel.gymtracker_api.exercise.dto.ExercisePageResponse;
+import dev.manuel.gymtracker_api.exercise.dto.ExerciseFilterOptionsResponse;
 import dev.manuel.gymtracker_api.exercise.dto.ExerciseResponse;
 import dev.manuel.gymtracker_api.exercise.service.ExerciseService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -54,6 +55,14 @@ public class ExerciseController {
             @AuthenticationPrincipal UUID userId,
             @PathVariable UUID id) {
         return exerciseService.getExerciseById(id, userId);
+    }
+
+    @GetMapping("/filter-options")
+    @Operation(summary = "Get available exercise filter options")
+    @ApiResponse(responseCode = "200", description = "Visible exercise metadata values for filters")
+    public ExerciseFilterOptionsResponse getFilterOptions(
+            @AuthenticationPrincipal UUID userId) {
+        return exerciseService.getFilterOptions(userId);
     }
 
     @PostMapping

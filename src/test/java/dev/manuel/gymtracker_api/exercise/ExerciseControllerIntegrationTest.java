@@ -42,6 +42,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.contains;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -532,6 +533,75 @@ class ExerciseControllerIntegrationTest {
                 translationRepository.save(translation);
 
                 return savedExercise;
+        }
+
+        @Test
+        void shouldReturnOnlyVisibleSortedFilterOptions() throws Exception {
+                translationRepository.deleteAll();
+                exerciseRepository.deleteAll();
+                userRepository.deleteAll();
+
+                userA = createUser();
+                userB = createUser();
+
+                Exercise globalAlpha = createExercise(null, "Global alpha", "Lats", "Cable",
+                                ExerciseSource.EXERCISES_DATASET);
+                globalAlpha.setCategory("Alpha");
+                globalAlpha.setMuscleGroup("Back");
+                exerciseRepository.save(globalAlpha);
+
+                Exercise globalDuplicate = createExercise(null, "Global duplicate", "Lats", "Cable",
+                                ExerciseSource.EXERCISES_DATASET);
+                globalDuplicate.setCategory("Alpha");
+                globalDuplicate.setMuscleGroup("Back");
+                exerciseRepository.save(globalDuplicate);
+
+                Exercise globalZeta = createExercise(null, "Global zeta", "Quads", "Dumbbell",
+                                ExerciseSource.EXERCISES_DATASET);
+                globalZeta.setCategory("Zeta");
+                globalZeta.setMuscleGroup("Legs");
+                exerciseRepository.save(globalZeta);
+
+                Exercise own = createExercise(userA, "Own", "Pectorals", "Barbell", ExerciseSource.USER);
+                own.setCategory("Beta");
+                own.setMuscleGroup("Chest");
+                exerciseRepository.save(own);
+
+                Exercise privateExercise = createExercise(userB, "Private", "Private target", "Private equipment",
+                                ExerciseSource.USER);
+                privateExercise.setCategory("Private category");
+                privateExercise.setMuscleGroup("Private group");
+                exerciseRepository.save(privateExercise);
+
+                Exercise nullValues = createExercise(null, "Null values", "Lats", "Cable",
+                                ExerciseSource.EXERCISES_DATASET);
+                nullValues.setCategory(null);
+                nullValues.setEquipment(null);
+                nullValues.setMuscleGroup(null);
+                nullValues.setTargetMuscle(null);
+                exerciseRepository.save(nullValues);
+
+                Exercise blankValues = createExercise(null, "Blank values", "Lats", "Cable",
+                                ExerciseSource.EXERCISES_DATASET);
+                blankValues.setCategory("  ");
+                blankValues.setEquipment("  ");
+                blankValues.setMuscleGroup("  ");
+                blankValues.setTargetMuscle("  ");
+                exerciseRepository.save(blankValues);
+
+                mockMvc.perform(get("/api/exercises/filter-options")
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.generateToken(userA)))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.categories", contains("Alpha", "Beta", "Zeta")))
+                                .andExpect(jsonPath("$.equipment", contains("Barbell", "Cable", "Dumbbell")))
+                                .andExpect(jsonPath("$.muscleGroups", contains("Back", "Chest", "Legs")))
+                                .andExpect(jsonPath("$.targetMuscles", contains("Lats", "Pectorals", "Quads")));
+        }
+
+        @Test
+        void shouldRequireAuthenticationForFilterOptions() throws Exception {
+                mockMvc.perform(get("/api/exercises/filter-options"))
+                                .andExpect(status().isUnauthorized());
         }
 
         @Test

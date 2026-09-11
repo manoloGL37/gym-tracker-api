@@ -34,4 +34,28 @@ public interface ExerciseRepository
         );
 
     Optional<Exercise> findByOwnerIdAndClientId(UUID ownerId, UUID clientId);
+
+    @Query("""
+            SELECT e.category FROM Exercise e
+            WHERE e.deletedAt IS NULL AND (e.ownerId IS NULL OR e.ownerId = :userId)
+            """)
+    List<String> findVisibleCategories(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT e.equipment FROM Exercise e
+            WHERE e.deletedAt IS NULL AND (e.ownerId IS NULL OR e.ownerId = :userId)
+            """)
+    List<String> findVisibleEquipment(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT e.muscleGroup FROM Exercise e
+            WHERE e.deletedAt IS NULL AND (e.ownerId IS NULL OR e.ownerId = :userId)
+            """)
+    List<String> findVisibleMuscleGroups(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT e.targetMuscle FROM Exercise e
+            WHERE e.deletedAt IS NULL AND (e.ownerId IS NULL OR e.ownerId = :userId)
+            """)
+    List<String> findVisibleTargetMuscles(@Param("userId") UUID userId);
 }

@@ -1,7 +1,7 @@
 package dev.manuel.gymtracker_api.auth.service;
 
-import dev.manuel.gymtracker_api.auth.dto.AuthResponse;
 import dev.manuel.gymtracker_api.auth.dto.LoginRequest;
+import dev.manuel.gymtracker_api.auth.repository.RefreshTokenRepository;
 import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
 import dev.manuel.gymtracker_api.auth.security.JwtService;
 import dev.manuel.gymtracker_api.user.model.User;
@@ -32,6 +32,9 @@ class AuthServiceTest {
     @Mock
     private JwtService jwtService;
 
+    @Mock
+    private RefreshTokenRepository refreshTokenRepository;
+
     private AuthService authService;
 
     @BeforeEach
@@ -39,7 +42,9 @@ class AuthServiceTest {
         authService = new AuthService(
                 userRepository,
                 passwordEncoder,
-                jwtService
+                jwtService,
+                refreshTokenRepository,
+                2_592_000_000L
         );
     }
 
@@ -128,11 +133,13 @@ class AuthServiceTest {
         when(jwtService.generateToken(userId))
                 .thenReturn(token);
 
-        AuthResponse response =
+        AuthSession session =
                 authService.login(request);
 
-        assertNotNull(response);
-        assertEquals(token, response.accessToken());
+        assertNotNull(session);
+        assertEquals(token, session.response().accessToken());
+        assertNotNull(session.refreshToken());
+        verify(refreshTokenRepository).save(any());
 
         verify(jwtService)
                 .generateToken(userId);

@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
+import dev.manuel.gymtracker_api.auth.exception.InvalidRefreshTokenException;
 import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
 import dev.manuel.gymtracker_api.routine.exception.DuplicateRoutineExercisePositionException;
 import dev.manuel.gymtracker_api.user.exception.EmailAlreadyExistsException;
@@ -113,6 +114,16 @@ public class GlobalExceptionHandler {
                 return ResponseEntity
                                 .status(HttpStatus.UNAUTHORIZED)
                                 .body(response);
+        }
+
+        @ExceptionHandler(InvalidRefreshTokenException.class)
+        @ResponseStatus(HttpStatus.UNAUTHORIZED)
+        public ErrorResponse handleInvalidRefreshToken(InvalidRefreshTokenException exception) {
+                return new ErrorResponse(
+                                HttpStatus.UNAUTHORIZED.value(),
+                                "INVALID_REFRESH_TOKEN",
+                                exception.getMessage(),
+                                LocalDateTime.now());
         }
 
         @ExceptionHandler(HandlerMethodValidationException.class)
