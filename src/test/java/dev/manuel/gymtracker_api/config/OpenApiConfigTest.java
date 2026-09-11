@@ -21,6 +21,7 @@ class OpenApiConfigTest {
         assertEquals("v1", openApi.getInfo().getVersion());
         assertNotNull(openApi.getComponents().getSecuritySchemes().get("bearerAuth"));
         assertEquals("bearer", openApi.getComponents().getSecuritySchemes().get("bearerAuth").getScheme());
+        assertEquals("refreshToken", openApi.getComponents().getSecuritySchemes().get("refreshCookie").getName());
     }
 
     @Test

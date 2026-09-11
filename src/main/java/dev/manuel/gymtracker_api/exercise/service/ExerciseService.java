@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
 import dev.manuel.gymtracker_api.exercise.dto.CreateExerciseRequest;
 import dev.manuel.gymtracker_api.exercise.dto.ExerciseAliasResponse;
+import dev.manuel.gymtracker_api.exercise.dto.ExerciseFilterOptionsResponse;
 import dev.manuel.gymtracker_api.exercise.dto.ExercisePageResponse;
 import dev.manuel.gymtracker_api.exercise.dto.ExerciseResponse;
 import dev.manuel.gymtracker_api.exercise.dto.ExerciseTranslationResponse;
@@ -155,6 +156,14 @@ public class ExerciseService {
                                 exercise,
                                 translations,
                                 aliases);
+        }
+
+        public ExerciseFilterOptionsResponse getFilterOptions(UUID userId) {
+                return new ExerciseFilterOptionsResponse(
+                                sortedValues(exerciseRepository.findVisibleCategories(userId)),
+                                sortedValues(exerciseRepository.findVisibleEquipment(userId)),
+                                sortedValues(exerciseRepository.findVisibleMuscleGroups(userId)),
+                                sortedValues(exerciseRepository.findVisibleTargetMuscles(userId)));
         }
 
         @Transactional
@@ -338,5 +347,13 @@ public class ExerciseService {
                                 exercise.getSecondaryMuscles(),
                                 translationResponses,
                                 aliasResponses);
+        }
+
+        private List<String> sortedValues(List<String> values) {
+                return values.stream()
+                                .filter(value -> value != null && !value.isBlank())
+                                .distinct()
+                                .sorted()
+                                .toList();
         }
 }

@@ -23,6 +23,11 @@ public class OpenApiConfig {
                                 .type(SecurityScheme.Type.HTTP)
                                 .scheme("bearer")
                                 .bearerFormat("JWT")
-                                .description("Paste a JWT access token obtained from the login endpoint.")));
+                                .description("Paste a JWT access token obtained from login or refresh."))
+                        .addSecuritySchemes("refreshCookie", new SecurityScheme()
+                                .type(SecurityScheme.Type.APIKEY)
+                                .in(SecurityScheme.In.COOKIE)
+                                .name("refreshToken")
+                                .description("HttpOnly refresh cookie set and rotated by the server.")));
     }
 }

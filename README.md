@@ -6,7 +6,7 @@ The project is designed as a modular monolith: one deployable Spring Boot applic
 
 ## Features
 
-- JWT-based authentication and stateless Spring Security
+- Short-lived JWT access tokens plus persistent, rotating refresh sessions
 - User registration and current-user profile retrieval
 - Global exercise catalog plus private custom exercises
 - Exercise translations, aliases, filters, and pagination
@@ -62,7 +62,7 @@ Swagger groups endpoints by Authentication, Users, Exercises, Routines, Workouts
 1. Call `POST /api/auth/login` with valid credentials.
 2. Copy the `accessToken` from the response.
 3. Select **Authorize** in Swagger UI and paste the token in the `bearerAuth` field. The token value only is enough; Swagger UI applies the `Bearer` prefix.
-4. Call protected endpoints normally. Public registration and login do not require authorization.
+4. Call protected endpoints normally. The login response also sets an HttpOnly refresh cookie; Swagger/browser clients can use it with `POST /api/auth/refresh`.
 
 ## Running Locally
 
@@ -108,10 +108,17 @@ Flyway applies pending migrations at startup. Normal startup does not import the
 | `SPRING_DATASOURCE_USERNAME` | PostgreSQL user | `gymtracker` |
 | `SPRING_DATASOURCE_PASSWORD` | PostgreSQL password | `gymtracker` |
 | `JWT_SECRET` | Secret used to sign JWTs | Required |
+| `JWT_EXPIRATION_MS` | Access-token lifetime in milliseconds | `3600000` (1 hour) |
+| `REFRESH_TOKEN_EXPIRATION_MS` | Absolute refresh-session lifetime in milliseconds | `2592000000` (30 days) |
+| `REFRESH_COOKIE_NAME` | Refresh cookie name | `refreshToken` |
+| `REFRESH_COOKIE_SECURE` | Emit the cookie only over HTTPS | `false` |
+| `REFRESH_COOKIE_SAME_SITE` | Cookie SameSite policy | `Lax` |
 | `PORT` | HTTP server port | `8080` |
 | `APP_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API (no paths and no trailing slash), for example `http://localhost:4200,https://gym-tracker-eight-dun.vercel.app` | `http://localhost:4200,https://gym-tracker-eight-dun.vercel.app` |
 
 Never commit production credentials or JWT secrets. Production configuration is supplied through the deployment environment.
+
+For Render production set `JWT_SECRET`, `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `APP_CORS_ALLOWED_ORIGINS` to the exact Angular origins, `REFRESH_COOKIE_SECURE=true`, and `REFRESH_COOKIE_SAME_SITE=None`. Keep `REFRESH_COOKIE_NAME=refreshToken`, `JWT_EXPIRATION_MS=3600000`, and `REFRESH_TOKEN_EXPIRATION_MS=2592000000` unless deliberately changing the documented frontend contract. Never use `*` in `APP_CORS_ALLOWED_ORIGINS`: credentialed CORS requires exact origins.
 
 ## Database Migrations
 
@@ -154,7 +161,7 @@ docker compose down
 Run the full test suite with:
 
 ```powershell
-./mvnw test
+./mvnw clean test
 ```
 
 Integration tests use Testcontainers and require Docker to be available.
@@ -169,4 +176,4 @@ GitHub → Render Web Service → Neon PostgreSQL
 
 Render runs the Spring Boot application and connects to Neon using deployment environment variables. No production credentials are stored in this repository.
 
-The current production API URL is <https://gym-tracker-api-s70k.onrender.com>. The deployed frontend origin is `https://gym-tracker-eight-dun.vercel.app`; it is included in the default CORS policy. Configure additional/replacement origins through `APP_CORS_ALLOWED_ORIGINS`; do not use `*`.
+The current production API URL is <https://gym-tracker-api-s70k.onrender.com>. The deployed frontend origin is `https://gym-tracker-eight-dun.vercel.app`; it is included in the default CORS policy. Configure additional/replacement origins through `APP_CORS_ALLOWED_ORIGINS`; do not use `*`. CORS allows credentials so Angular can send the HttpOnly refresh cookie.
