@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -24,6 +25,9 @@ import java.util.UUID;
 
 @Service
 public class AuthService {
+
+    // ponytail: a short replay window handles concurrent browser refreshes; sender-constrained tokens are the upgrade path.
+    private static final Duration ROTATED_TOKEN_REUSE_GRACE = Duration.ofSeconds(10);
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -75,6 +79,9 @@ public class AuthService {
         Instant now = Instant.now();
 
         if (current.getRevokedAt() != null) {
+            if (isConcurrentRotation(current, now)) {
+                return createSuccessor(current, now, false);
+            }
             refreshTokenRepository.revokeActiveFamily(current.getFamilyId(), now);
             throw new InvalidRefreshTokenException();
         }
@@ -83,24 +90,7 @@ public class AuthService {
             throw new InvalidRefreshTokenException();
         }
 
-        String nextRawToken = randomToken();
-        RefreshToken next = tokenFor(
-                current.getUser(),
-                current.getFamilyId(),
-                nextRawToken,
-                current.getExpiresAt(),
-                now
-        );
-        current.setRevokedAt(now);
-        current.setReplacedByTokenId(next.getId());
-        refreshTokenRepository.save(current);
-        refreshTokenRepository.save(next);
-
-        return new AuthSession(
-                new AuthResponse(jwtService.generateToken(current.getUser().getId())),
-                nextRawToken,
-                next.getExpiresAt()
-        );
+        return createSuccessor(current, now, true);
     }
 
     @Transactional
@@ -123,6 +113,35 @@ public class AuthService {
                 new AuthResponse(jwtService.generateToken(user.getId())),
                 rawToken,
                 expiresAt
+        );
+    }
+
+    private boolean isConcurrentRotation(RefreshToken token, Instant now) {
+        return token.getReplacedByTokenId() != null
+                && token.getRevokedAt().plus(ROTATED_TOKEN_REUSE_GRACE).isAfter(now)
+                && refreshTokenRepository.existsByFamilyIdAndRevokedAtIsNull(token.getFamilyId());
+    }
+
+    private AuthSession createSuccessor(RefreshToken current, Instant now, boolean revokeCurrent) {
+        String nextRawToken = randomToken();
+        RefreshToken next = tokenFor(
+                current.getUser(),
+                current.getFamilyId(),
+                nextRawToken,
+                current.getExpiresAt(),
+                now
+        );
+        if (revokeCurrent) {
+            current.setRevokedAt(now);
+            current.setReplacedByTokenId(next.getId());
+            refreshTokenRepository.save(current);
+        }
+        refreshTokenRepository.save(next);
+
+        return new AuthSession(
+                new AuthResponse(jwtService.generateToken(current.getUser().getId())),
+                nextRawToken,
+                next.getExpiresAt()
         );
     }
 

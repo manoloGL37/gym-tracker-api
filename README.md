@@ -108,6 +108,7 @@ Flyway applies pending migrations at startup. Normal startup does not import the
 | `SPRING_DATASOURCE_USERNAME` | PostgreSQL user | `gymtracker` |
 | `SPRING_DATASOURCE_PASSWORD` | PostgreSQL password | `gymtracker` |
 | `JWT_SECRET` | Secret used to sign JWTs | Required |
+| `SPRING_PROFILES_ACTIVE` | Activates environment-specific defaults; use `prod` on Render | none |
 | `JWT_EXPIRATION_MS` | Access-token lifetime in milliseconds | `3600000` (1 hour) |
 | `REFRESH_TOKEN_EXPIRATION_MS` | Absolute refresh-session lifetime in milliseconds | `2592000000` (30 days) |
 | `REFRESH_COOKIE_NAME` | Refresh cookie name | `refreshToken` |
@@ -118,7 +119,7 @@ Flyway applies pending migrations at startup. Normal startup does not import the
 
 Never commit production credentials or JWT secrets. Production configuration is supplied through the deployment environment.
 
-For Render production set `JWT_SECRET`, `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `APP_CORS_ALLOWED_ORIGINS` to the exact Angular origins, `REFRESH_COOKIE_SECURE=true`, and `REFRESH_COOKIE_SAME_SITE=None`. Keep `REFRESH_COOKIE_NAME=refreshToken`, `JWT_EXPIRATION_MS=3600000`, and `REFRESH_TOKEN_EXPIRATION_MS=2592000000` unless deliberately changing the documented frontend contract. Never use `*` in `APP_CORS_ALLOWED_ORIGINS`: credentialed CORS requires exact origins.
+For Render production set `SPRING_PROFILES_ACTIVE=prod`, `JWT_SECRET`, `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, and `APP_CORS_ALLOWED_ORIGINS=https://gym-tracker-eight-dun.vercel.app`. The `prod` profile defaults `REFRESH_COOKIE_SECURE=true` and `REFRESH_COOKIE_SAME_SITE=None`; these may be set explicitly for operational clarity. Keep `REFRESH_COOKIE_NAME=refreshToken`, `JWT_EXPIRATION_MS=3600000`, and `REFRESH_TOKEN_EXPIRATION_MS=2592000000` unless deliberately changing the documented frontend contract. Never use `*` in `APP_CORS_ALLOWED_ORIGINS`: credentialed CORS requires exact origins.
 
 ## Database Migrations
 

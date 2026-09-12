@@ -21,8 +21,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.time.LocalDateTime;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import jakarta.servlet.http.Cookie;
@@ -256,6 +257,13 @@ class AuthControllerIntegrationTest {
                 .andReturn();
         String secondToken = refreshTokenFrom(rotation);
 
+        RefreshToken firstStored = refreshTokenRepository.findAll().stream()
+                .filter(token -> token.getReplacedByTokenId() != null)
+                .findFirst()
+                .orElseThrow();
+        firstStored.setRevokedAt(Instant.now().minus(Duration.ofSeconds(11)));
+        refreshTokenRepository.save(firstStored);
+
         mockMvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", firstToken)))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", secondToken)))
@@ -271,10 +279,35 @@ class AuthControllerIntegrationTest {
                 .andExpect(status().isNoContent())
                 .andExpect(header().string(SET_COOKIE, org.hamcrest.Matchers.allOf(
                         org.hamcrest.Matchers.containsString("refreshToken="),
-                        org.hamcrest.Matchers.containsString("Max-Age=0")
+                        org.hamcrest.Matchers.containsString("Max-Age=0"),
+                        org.hamcrest.Matchers.containsString("HttpOnly"),
+                        org.hamcrest.Matchers.containsString("Secure"),
+                        org.hamcrest.Matchers.containsString("SameSite=None"),
+                        org.hamcrest.Matchers.containsString("Path=/api/auth")
                 )));
         mockMvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", token)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldAllowNearSimultaneousRefreshesWithoutRevokingTheirSuccessors() throws Exception {
+        User user = userRepository.save(createUser("concurrent@example.com", "password123"));
+        String firstToken = loginAndGetRefreshToken(user.getEmail(), "password123");
+
+        String firstSuccessor = refreshTokenFrom(mockMvc.perform(post("/api/auth/refresh")
+                        .cookie(new Cookie("refreshToken", firstToken)))
+                .andExpect(status().isOk())
+                .andReturn());
+        String secondSuccessor = refreshTokenFrom(mockMvc.perform(post("/api/auth/refresh")
+                        .cookie(new Cookie("refreshToken", firstToken)))
+                .andExpect(status().isOk())
+                .andReturn());
+
+        org.junit.jupiter.api.Assertions.assertNotEquals(firstSuccessor, secondSuccessor);
+        mockMvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", firstSuccessor)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", secondSuccessor)))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -306,8 +339,27 @@ class AuthControllerIntegrationTest {
                 .andExpect(header().string(ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
 
         mockMvc.perform(options("/api/auth/refresh")
+                        .header(ORIGIN, "https://gym-tracker-eight-dun.vercel.app")
+                        .header(ACCESS_CONTROL_REQUEST_METHOD, "POST"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(ACCESS_CONTROL_ALLOW_ORIGIN, "https://gym-tracker-eight-dun.vercel.app"))
+                .andExpect(header().string(ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
+
+        mockMvc.perform(options("/api/auth/logout")
+                        .header(ORIGIN, "https://gym-tracker-eight-dun.vercel.app")
+                        .header(ACCESS_CONTROL_REQUEST_METHOD, "POST"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(ACCESS_CONTROL_ALLOW_ORIGIN, "https://gym-tracker-eight-dun.vercel.app"))
+                .andExpect(header().string(ACCESS_CONTROL_ALLOW_CREDENTIALS, "true"));
+
+        mockMvc.perform(options("/api/auth/refresh")
                         .header(ORIGIN, "https://attacker.example")
                         .header(ACCESS_CONTROL_REQUEST_METHOD, "POST"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist(ACCESS_CONTROL_ALLOW_ORIGIN));
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .header(ORIGIN, "https://attacker.example"))
                 .andExpect(status().isForbidden())
                 .andExpect(header().doesNotExist(ACCESS_CONTROL_ALLOW_ORIGIN));
     }
