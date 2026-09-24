@@ -1,6 +1,9 @@
 package dev.manuel.gymtracker_api.auth.service;
 
 import dev.manuel.gymtracker_api.auth.dto.LoginRequest;
+import dev.manuel.gymtracker_api.auth.dto.MobileRefreshRequest;
+import dev.manuel.gymtracker_api.auth.dto.MobileAuthResponse;
+import dev.manuel.gymtracker_api.auth.dto.AuthResponse;
 import dev.manuel.gymtracker_api.auth.repository.RefreshTokenRepository;
 import dev.manuel.gymtracker_api.auth.exception.InvalidCredentialsException;
 import dev.manuel.gymtracker_api.auth.security.JwtService;
@@ -178,6 +181,15 @@ class AuthServiceTest {
 
         verify(passwordEncoder)
                 .matches("plain-password", storedHash);
+    }
+
+    @Test
+    void authDtosDoNotPrintSecretsAtDebugLevel() {
+        String secret = "fake-secret-for-log-check";
+        assertFalse(new MobileRefreshRequest(secret).toString().contains(secret));
+        assertFalse(new MobileAuthResponse(secret, secret, java.time.Instant.now()).toString().contains(secret));
+        assertFalse(new AuthResponse(secret).toString().contains(secret));
+        assertFalse(new LoginRequest("user@example.com", secret).toString().contains(secret));
     }
 
     private User createUser(

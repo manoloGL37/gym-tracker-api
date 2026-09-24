@@ -23,37 +23,54 @@ Los de validación son `{ status, code: "VALIDATION_ERROR", errors: { campo: men
 
 ## 2. Autenticación
 
-### Registro, login y perfil
+### Sesión nativa Android
 
-| Operación | Método/ruta | Auth | Cuerpo / respuesta |
-| --- | --- | --- | --- |
-| Registro | `POST /api/users` | Pública | `CreateUserRequest { email, password }` -> `201 UserResponse { id, email, createdAt }` |
-| Login | `POST /api/auth/login` | Pública | `LoginRequest { email, password }` -> `200 { accessToken }` y `Set-Cookie` de refresh |
-| Perfil actual | `GET /api/users/me` | `Bearer` | `200 UserResponse` |
-| Refresh | `POST /api/auth/refresh` | Cookie de refresh | sin cuerpo -> `200 { accessToken }` y cookie rotada |
-| Logout | `POST /api/auth/logout` | Cookie opcional | sin cuerpo -> `204`, revoca familia si la cookie es válida y siempre la borra |
+Registro: `POST /api/users` con `{ "email": "ana@example.com", "password": "contraseña-de-ejemplo" }` devuelve `201 UserResponse` y no inicia sesión. Las tres rutas nativas son públicas y requieren HTTPS en producción. Usan JSON, no leen ni emiten cookies; cada respuesta de sesión tiene `Cache-Control: no-store`.
 
-`email` debe ser no vacío y email válido. La contraseña de registro es 8--100 caracteres; en login sólo se exige no vacía. Un email ya registrado devuelve `409 EMAIL_ALREADY_EXISTS`; credenciales inválidas, `401 INVALID_CREDENTIALS`. Registrar no inicia sesión.
+**Login** `POST /api/auth/mobile/login`:
 
-El access token es un JWT firmado cuyo `sub` es el UUID de usuario e incluye `iat` y `exp`; se envía como `Authorization: Bearer <accessToken>`. No hay roles, ni `tokenType`, usuario, refresh token o expiración como campos JSON. Por defecto expira a los 3.600.000 ms (una hora); el cliente puede leer `exp`, pero debe tratar un `401` como la autoridad final.
+```json
+{ "email": "ana@example.com", "password": "contraseña-de-ejemplo" }
+```
 
-### Refresh, expiración y cookies
+`200`:
 
-Login crea una sesión persistente y almacena sólo SHA-256 del refresh token. La cookie se llama `refreshToken` por defecto, es host-only (sin `Domain`), `HttpOnly`, `Path=/api/auth` y tiene `Max-Age` de la sesión. La vida del refresh es absoluta desde el login, por defecto 2.592.000.000 ms (30 días), y no se prolonga al refrescar.
+```json
+{
+  "accessToken": "FAKE_ACCESS_JWT",
+  "refreshToken": "FAKE_OPAQUE_REFRESH_TOKEN",
+  "refreshExpiresAt": "2026-10-24T12:00:00Z"
+}
+```
 
-Cada refresh correcto revoca el token presentado, crea otro de la misma familia, entrega una cookie y un JWT nuevos. Hay una ventana de gracia de 10 segundos para refrescos concurrentes: reutilizar el token recién rotado durante esa ventana crea un sucesor válido; reutilizarlo después revoca los tokens activos de toda la familia y devuelve `401 INVALID_REFRESH_TOKEN`. Coalescer refreshes sigue siendo obligatorio en el cliente. Un refresh inválido también emite una cookie vacía con `Max-Age=0`. Logout es idempotente desde el punto de vista HTTP, pero el access JWT no se revoca: Android debe descartarlo localmente.
+**Refresh** `POST /api/auth/mobile/refresh`:
 
-En producción (`prod`), la cookie usa `Secure=true` y `SameSite=None`; en local por defecto, `Secure=false` y `SameSite=Lax`. `SameSite=None` sin `Secure` impide iniciar la aplicación. CSRF está desactivado y la app es stateless.
+```json
+{ "refreshToken": "FAKE_OPAQUE_REFRESH_TOKEN" }
+```
 
-### Decisión Android: la cookie actual no es un contrato nativo suficiente
+`200` devuelve el mismo esquema que login, con **un refresh token nuevo** y el mismo `refreshExpiresAt` absoluto. Reemplazar de forma atómica el credential almacenado después de recibir la respuesta. No enviar refresh en URL, query ni bearer. El `accessToken` contiene `sub` (UUID), `iat` y `exp`; expira por defecto tras 1 hora. No hay un campo JSON independiente para su expiración. Para recursos protegidos usar `Authorization: Bearer <accessToken>`; ante `401` de un recurso, hacer un único refresh coordinado y reintentar una vez.
 
-No se debe asumir que el modelo de cookie `HttpOnly` del navegador se transportará ni gestionará de forma fiable con el cliente HTTP nativo de Android. El backend no devuelve el refresh token en JSON ni acepta `Authorization`/cuerpo para `/api/auth/refresh` o logout: espera exclusivamente la cookie `refreshToken`. Por tanto, **el flujo actual no permite implementar de forma soportada restauración/rotación de sesión nativa**.
+**Logout** `POST /api/auth/mobile/logout` con `{ "refreshToken": "FAKE_OPAQUE_REFRESH_TOKEN" }` devuelve `204` sin cuerpo. Revoca todos los refresh tokens activos de **esa familia/sesión**, incluso si se presenta un antecesor rotado; repetirlo es seguro. No revoca otras familias del mismo usuario ni el JWT ya emitido: descartar access y refresh locales al cerrar sesión. Si una petición de logout tiene fallo de red/5xx, reintentar o conservar la revocación pendiente.
 
-Para Android, el objetivo recomendado es access JWT de corta vida en memoria y refresh token de larga vida en Android Keystore/EncryptedSharedPreferences, enviado en un mecanismo nativo explícito (por ejemplo, cuerpo o encabezado dedicado) sobre TLS. Eso exige primero una variante de sesión/refresh/logout diseñada para móviles, con rotación y revocación equivalentes; no se implementa en esta tarea. Hasta entonces, sólo un cliente que preserve cookies de forma deliberada y segura podría operar, pero no es la arquitectura nativa autorizada por este contrato.
+Cada login, web o móvil, crea una familia independiente: teléfono, navegador y otro dispositivo pueden coexistir. Sólo SHA-256 del token opaco aleatorio de 256 bits se guarda en PostgreSQL; el valor bruto sólo se devuelve al emitir/rotar y nunca debe aparecer en logs. El refresh vence 30 días después del login por defecto y la rotación no prolonga ese límite. La reutilización de un token rotado dentro de 10 segundos puede generar otro sucesor de la misma familia para tolerar concurrencia. Fuera de esa ventana, se revoca toda la familia y se responde `401 INVALID_REFRESH_TOKEN`. Android debe serializar/coalescer refreshes; si llegan dos sucesores, conservar el último confirmado y evitar refrescos paralelos. Un fallo de red tras enviar refresh deja resultado incierto: recuperar dentro de la gracia si es posible; fuera de ella puede requerir login.
 
-### CORS
+El backend no controla el almacenamiento del dispositivo. Android debe guardar el refresh credential mediante almacenamiento seguro respaldado por mecanismos de seguridad de Android/Keystore según corresponda. Nunca en SharedPreferences en texto plano. Mantener access token preferiblemente en memoria y no registrar ni incluir credenciales en telemetría.
 
-CORS es relevante para web, no para peticiones nativas Android. Permite orígenes exactos configurados, credenciales, métodos `GET, POST, PUT, PATCH, DELETE, OPTIONS` y encabezados `Authorization, Content-Type, Accept, Origin`, con preflight de 3600 segundos; `*` se rechaza. En producción sólo está permitido por defecto `https://gym-tracker-eight-dun.vercel.app`. No añadir un origen Android: las apps nativas no tienen un Origin web que deba autorizarse.
+| Resultado | Interpretación Android |
+| --- | --- |
+| `400 VALIDATION_ERROR` | JSON ausente/campo vacío o malformado; corregir solicitud, sin borrar sesión automáticamente. |
+| `401 INVALID_CREDENTIALS` en login | Credenciales definitivas incorrectas. |
+| `401 INVALID_REFRESH_TOKEN` en refresh | Sesión de refresh definitivamente inválida, vencida, revocada o reutilizada: borrar credenciales locales y pedir login. El mensaje no revela el token. |
+| `204` en logout | Revocación aceptada o token ya ausente. |
+| Red/timeout, `500`, `502`, `503`, `504` | Estado incierto o transitorio: conservar sesión local, reintentar con espera; **nunca** interpretarlo como logout. |
+| `401` en recurso bearer | Probar refresh una vez; el cuerpo de este `401` de Spring Security no tiene esquema JSON garantizado. |
+
+### Compatibilidad navegador y seguridad de transporte
+
+El flujo Angular sigue igual: `POST /api/auth/login` recibe sólo `{ "accessToken": "FAKE_ACCESS_JWT" }` y cookie HttpOnly; `/api/auth/refresh` no acepta cuerpo y rota esa cookie; `/api/auth/logout` la revoca y borra. La cookie host-only `refreshToken` por defecto usa `Path=/api/auth`, `HttpOnly`, y en producción `Secure; SameSite=None` (local: `SameSite=Lax`). Su expiración absoluta tampoco se extiende. El refresh web no se expone en JSON ni a JavaScript.
+
+CSRF está desactivado en la configuración actual. Las rutas nativas sólo aceptan el secreto explícito en JSON: el navegador no les entrega automáticamente la cookie web. El refresh web sí usa cookie automática; conserva la política CORS con orígenes exactos, credenciales y rechazo de orígenes no permitidos. No se ha ampliado CORS para Android, cuyos clientes HTTP nativos no están sujetos a CORS. Una protección CSRF dedicada para navegadores sigue siendo un endurecimiento futuro. Tampoco hay rate limiting en login/refresh: añadir límites en el borde o en backend es endurecimiento pendiente, sin introducir una dependencia nueva aquí.
 
 ## 3. Ejercicios
 
@@ -131,6 +148,8 @@ CreateWorkoutRequest = {
 WorkoutResponse = {
   id: UUID, clientId: UUID | null, routineId: UUID | null,
   startedAt: LocalDateTime, completedAt: LocalDateTime | null,
+  startedAtInstant: Instant | null, completedAtInstant: Instant | null,
+  calendarZone: string | null,
   notes: string | null, createdAt: LocalDateTime,
   exercises: { id: UUID, exerciseId: UUID, position: number, notes: string | null,
     sets: { id: UUID, clientId: UUID | null, setNumber: number,
@@ -145,6 +164,7 @@ UpdateWorkoutRequest = { completed?: boolean, notes?: string }
 | Método/ruta | Resultado |
 | --- | --- |
 | `POST /api/workouts` | `201 WorkoutResponse`; inicia o importa una sesión histórica basada en snapshot de rutina. |
+| `POST /api/workouts/mobile` | `201 WorkoutResponse`; crea/importa con instantes explícitos y zona de calendario capturada. |
 | `GET /api/workouts?page=&size=&sort=` | `200 Page<WorkoutResponse>`; todos los entrenamientos propios, sin filtros fecha/estado; orden efectivo `createdAt DESC, id ASC`. Incluye ejercicios y sets. |
 | `GET /api/workouts/{id}` | `200 WorkoutResponse` propio; ejercicios `position ASC`, sets `setNumber ASC`; si no, `404`. |
 | `POST /api/workouts/{workoutId}/exercises/{workoutExerciseId}/sets` | `201 WorkoutSetResponse`. El ejercicio hijo debe pertenecer al entrenamiento propio. `setNumber` es 1-based, único por ejercicio; duplicado sin mismo `clientId`: `400 DUPLICATE_WORKOUT_SET_NUMBER`. `weight` 0.00--9999.99, `reps >=1`, `rpe` opcional 0.0--10.0. `clientId` estable por workout-exercise devuelve el set existente con `201`. |
@@ -165,9 +185,40 @@ Todas requieren bearer. Los parámetros son `LocalDate` obligatorios `YYYY-MM-DD
 
 ## 7. Fechas, hora y zona horaria
 
-`LocalDate` se serializa como `YYYY-MM-DD`. Los timestamps son `LocalDateTime` ISO-8601 sin offset, por ejemplo `2026-09-24T18:30:00` (la fracción de segundo puede estar presente). El backend no declara zona del usuario, zona de servidor, UTC ni conversión de offsets: Android no debe etiquetarlos como UTC ni aplicar conversión automática. Debe acordarse una convención de producto antes de sincronizar entre zonas.
+La API distingue un **instante real** de una **fecha de calendario**. Android guarda los momentos como milisegundos Unix: convertir con `Instant.ofEpochMilli(ms)` y serializar ISO-8601 con `Z`, por ejemplo `2026-10-25T00:30:00Z`. El backend acepta instantes ISO-8601 con `Z` u offset explícito y devuelve siempre UTC `Z` en los nuevos campos `*Instant`. No enviar epoch millis como número JSON ni convertirlos a `LocalDateTime` sin zona.
 
-`createdAt` de usuario, `createdAt/updatedAt` de rutina y `createdAt` de entrenamiento los genera el servidor. `startedAt` puede venir del cliente; `completedAt` puede venir del cliente sólo en POST. Estadísticas interpretan ambos extremos como inclusivos sobre `startedAt`, implementado internamente como `[from 00:00, (to + 1 día) 00:00)` en `LocalDateTime`.
+Para sincronizar un entrenamiento nuevo, Android usa `POST /api/workouts/mobile` con bearer:
+
+```json
+{
+  "clientId": "00000000-0000-4000-8000-000000000001",
+  "routineId": "00000000-0000-4000-8000-000000000002",
+  "startedAt": "2026-10-25T00:30:00Z",
+  "completedAt": "2026-10-25T01:30:00Z",
+  "calendarZone": "Europe/Madrid",
+  "notes": "Ejemplo"
+}
+```
+
+`clientId`, `completedAt` y `notes` son opcionales. `routineId`, `startedAt` y `calendarZone` (ID IANA válido) son obligatorios. `completedAt` no puede ser anterior a `startedAt` como instante. El `clientId` conserva la idempotencia existente. La respuesta `201 WorkoutResponse` mantiene los campos locales web y añade `startedAtInstant`, `completedAtInstant` y `calendarZone`:
+
+```json
+{
+  "startedAt": "2026-10-25T02:30:00",
+  "completedAt": "2026-10-25T02:30:00",
+  "startedAtInstant": "2026-10-25T00:30:00Z",
+  "completedAtInstant": "2026-10-25T01:30:00Z",
+  "calendarZone": "Europe/Madrid"
+}
+```
+
+El ejemplo abrevia el resto de `WorkoutResponse`. En lectura/listado, Android **usa sólo `*Instant`** para momentos reales. `startedAt`/`completedAt` siguen siendo fechas-hora locales sin offset para Angular y para el calendario/estadísticas. La zona se captura al crear el entrenamiento: viajar después no mueve el día histórico. Para una sesión que cruza zonas, la zona de calendario es la seleccionada al inicio. El servidor convierte cada instante con esa zona al valor local de las columnas existentes; `DATE(started_at)` determina el día estadístico. Un cambio de horario de verano no altera el instante: dos instantes pueden tener la misma hora local durante el solapamiento; la comparación de finalización se hace por instantes. En el salto hacia adelante no se inventa una hora local inexistente.
+
+Los filtros de estadísticas siguen siendo `LocalDate` `YYYY-MM-DD`, inclusivos; internamente `[from 00:00, (to + 1 día) 00:00)` sobre la fecha local capturada. Semana: lunes a domingo según fechas de calendario de cada workout. Mes: primer a último día de calendario. No se usan intervalos fijos de 24 horas para definir días, semanas o meses; esto evita errores DST. Si se agregan workouts de varias zonas, cada uno cuenta por su día de origen, no por la zona actual del teléfono.
+
+La migración V14 añade columnas `TIMESTAMP WITH TIME ZONE` para ambos instantes y `calendar_zone`, todas nullable. **No cambia ni reinterpreta filas antiguas**: sus nuevos campos son `null`, su hora local y sus estadísticas históricas permanecen intactas. Sin la zona original no existe una conversión fiable de un `LocalDateTime` histórico a epoch millis; Android debe tratar esos campos nulos como datos heredados de hora local y no fabricar un instante. Si necesita convertirlos para sincronización bidireccional, debe obtener una zona confirmada por el usuario o una migración explícita posterior. Los `createdAt` de usuario/rutina/workout siguen siendo audit `LocalDateTime` heredados, no instantes de actividad.
+
+La ruta web `POST /api/workouts` y sus campos `startedAt`/`completedAt` conservan exactamente su semántica local anterior. `PATCH /api/workouts/{id}` para un entrenamiento móvil usa el instante del servidor y la zona capturada al completar; para uno heredado conserva el comportamiento local anterior.
 
 ## 8. Idempotencia
 
@@ -187,8 +238,8 @@ Generar UUID v4 una sola vez antes de poner una creación en cola; persistirlo j
 | Clase | Operaciones | Motivo / regla |
 | --- | --- | --- |
 | A. Seguras para retry en cola | POST exercise/routine/workout/set con `clientId` persistido | El servidor deduplica por la clave indicada. Resolver antes los IDs de dependencias. |
-| B. Seguras con condiciones | GETs; PUT rutina; PUT ejercicio; PATCH workout; DELETE exercise/routine; logout | Reintentar GET sólo ante red/5xx. Las mutaciones no tienen control de concurrencia/versionado: serializar por recurso, volver a leer tras fallo incierto y no reintentar DELETE tras un `404` como si fuera error. PUT rutina recrea hijos. PATCH no puede expresar limpiar notas ni timestamp final histórico. Logout puede repetirse, pero requiere el canal móvil de refresh inexistente. |
-| C. Inseguras / capacidad backend necesaria | Crear sesión nativa persistente; actualizar/borrar sets; actualizar/borrar/agregar workout exercises; borrar workouts; importar un workout con exercises que no proceden de una rutina sincronizada; sincronización de conflictos | No hay endpoint o contrato de idempotencia/versiones para estas necesidades. La cookie HttpOnly es específica del navegador. |
+| B. Seguras con condiciones | GETs; PUT rutina; PUT ejercicio; PATCH workout; DELETE exercise/routine; logout | Reintentar GET sólo ante red/5xx. Las mutaciones no tienen control de concurrencia/versionado: serializar por recurso, volver a leer tras fallo incierto y no reintentar DELETE tras un `404` como si fuera error. PUT rutina recrea hijos. PATCH no puede expresar limpiar notas ni timestamp final histórico. Logout móvil puede repetirse con su refresh credential. |
+| C. Inseguras / capacidad backend necesaria | Actualizar/borrar sets; actualizar/borrar/agregar workout exercises; borrar workouts; importar un workout con exercises que no proceden de una rutina sincronizada; sincronización de conflictos | No hay endpoint o contrato de idempotencia/versiones para estas necesidades. La sesión nativa usa los endpoints móviles de autenticación descritos arriba. |
 
 ## 10. Grafo de dependencias de sincronización
 
@@ -210,7 +261,7 @@ Un workout depende de una rutina propia no borrada, incluso al crear histórico.
 | --- | --- |
 | `400 VALIDATION_ERROR` | Mostrar `errors` por campo; no reintentar sin corregir. |
 | `400 INVALID_PARAMETER`, `INVALID_REQUEST`, `DUPLICATE_EXERCISE_POSITION`, `DUPLICATE_WORKOUT_SET_NUMBER` | Error de input/estado; no reintento automático. |
-| `401` en recurso bearer | Access inválido/caducado; intentar una sola restauración de sesión cuando exista el futuro flujo móvil; no repetir la petición infinitamente. El cuerpo puede no ser JSON. |
+| `401` en recurso bearer | Access inválido/caducado; intentar una sola restauración de sesión mediante el flujo móvil; no repetir la petición infinitamente. El cuerpo puede no ser JSON. |
 | `401 INVALID_CREDENTIALS` / `INVALID_REFRESH_TOKEN` | Login o sesión inválida; borrar estado auth. Un refresh inválido revoca/limpia sesión. |
 | `404 RESOURCE_NOT_FOUND` | Recurso ausente, borrado, ajeno o relación inválida: refrescar estado y resolver conflicto, no reintentar a ciegas. |
 | `409 EMAIL_ALREADY_EXISTS` | Conflicto de registro, requiere intervención. |
@@ -226,8 +277,7 @@ Producción corre en Render (`https://gym-tracker-api-s70k.onrender.com`) y pued
 
 ### Requeridas antes de implementar funcionalidades Android
 
-- Contrato de sesión móvil: emitir/aceptar refresh token en transporte nativo seguro, rotación, logout/revocación y documentación de almacenamiento Keystore; mantener aislado el flujo browser-cookie.
-- Decisión y contrato de zona horaria (preferiblemente timestamps con offset/UTC y zona de usuario) para no corromper fechas históricas/estadísticas entre dispositivos.
+- Conversión de registros web heredados a instantes sólo tras conocer su zona original; sin ella deben conservarse como hora local.
 - Mutaciones de workout necesarias para edición offline: update/delete de sets, add/update/delete de workout exercises, delete de workout y actualización explícita de notas/completedAt según producto.
 - Creación/importación de workout con snapshot de exercises y sets autocontenidos, sin exigir una rutina previamente sincronizada.
 
@@ -250,8 +300,11 @@ Producción corre en Render (`https://gym-tracker-api-s70k.onrender.com`) y pued
 | --- | --- | --- | --- | --- | --- |
 | Registro | POST | `/api/users` | No | No | No |
 | Login | POST | `/api/auth/login` | No | No | No |
-| Refresh | POST | `/api/auth/refresh` | Cookie | No | No (gap Android) |
+| Refresh web | POST | `/api/auth/refresh` | Cookie | No | No para Android |
 | Logout | POST | `/api/auth/logout` | Cookie opcional | No | Condicional |
+| Login nativo | POST | `/api/auth/mobile/login` | No | No | No; crea sesión nueva |
+| Refresh nativo | POST | `/api/auth/mobile/refresh` | JSON refresh | No | Condicional; resultado incierto tras timeout |
+| Logout nativo | POST | `/api/auth/mobile/logout` | JSON refresh | No | Sí, mismo token |
 | Perfil | GET | `/api/users/me` | Bearer | -- | Sí, lectura |
 | Listar/filtrar exercises | GET | `/api/exercises`, `/filter-options`, `/{id}` | Bearer | -- | Sí, lectura |
 | Crear exercise | POST | `/api/exercises` | Bearer | Sí | Sí |
@@ -260,10 +313,11 @@ Producción corre en Render (`https://gym-tracker-api-s70k.onrender.com`) y pued
 | Crear routine | POST | `/api/routines` | Bearer | Sí | Sí |
 | Editar/borrar routine | PUT/DELETE | `/api/routines/{id}` | Bearer | No | Condicional |
 | Crear/listar/leer workout | POST/GET | `/api/workouts`, `/{id}` | Bearer | POST sí | POST sí; GET sí lectura |
+| Crear workout nativo | POST | `/api/workouts/mobile` | Bearer | Sí | Sí con mismo `clientId` |
 | Completar/notas workout | PATCH | `/api/workouts/{id}` | Bearer | No | Condicional |
 | Crear set | POST | `/api/workouts/{workoutId}/exercises/{workoutExerciseId}/sets` | Bearer | Sí | Sí |
 | Estadísticas | GET | `/api/statistics/*` | Bearer | -- | Sí, lectura |
 
 ## Validación de discrepancias
 
-El contrato frontend existente concuerda con la implementación revisada en rutas y reglas principales. Esta versión para Android añade la conclusión operativa que allí no era necesaria: el refresh por cookie HttpOnly no es un flujo nativo soportado. También hace explícito un detalle de implementación importante para clientes que actualicen exercises: `PUT /api/exercises/{id}` no elimina traducciones omitidas; las actualiza/crea por idioma.
+El contrato frontend existente concuerda con la implementación revisada en rutas y reglas principales. La cookie HttpOnly sigue siendo exclusiva del flujo web; Android usa los endpoints nativos de JSON. `PUT /api/exercises/{id}` no elimina traducciones omitidas; las actualiza/crea por idioma.

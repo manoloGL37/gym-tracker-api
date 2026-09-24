@@ -12,4 +12,8 @@ public record LoginRequest(
         @NotBlank
         String password
 ) {
+    @Override
+    public String toString() {
+        return "LoginRequest[email=" + email + ", password=REDACTED]";
+    }
 }

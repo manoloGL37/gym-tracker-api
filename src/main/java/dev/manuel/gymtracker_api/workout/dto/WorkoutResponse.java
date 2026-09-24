@@ -1,6 +1,7 @@
 package dev.manuel.gymtracker_api.workout.dto;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,5 +13,8 @@ public record WorkoutResponse(
         LocalDateTime completedAt,
         String notes,
         List<WorkoutExerciseResponse> exercises,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        Instant startedAtInstant,
+        Instant completedAtInstant,
+        String calendarZone
 ) {}

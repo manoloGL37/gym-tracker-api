@@ -298,6 +298,9 @@ interface WorkoutResponse {
   notes: string | null;
   exercises: WorkoutExerciseResponse[]; // may be []
   createdAt: string;             // server-created audit timestamp
+  startedAtInstant: string | null; // UTC ISO instant for mobile-created workouts
+  completedAtInstant: string | null;
+  calendarZone: string | null;     // captured IANA zone for mobile-created workouts
 }
 interface WorkoutExerciseResponse {
   id: string;                    // server-generated
@@ -395,7 +398,7 @@ interface ExerciseStatisticsResponse {
 
 All aggregate fields are non-null and no matching data yields zeros plus `evolution: []`. Evolution is date ascending and only includes dates having a matching caller workout exercise. This route does not existence-check the exercise; it is scoped by `workouts.user_id`.
 
-## 9. Dates, timestamps, and timezone limitation
+## 9. Dates, timestamps, and timezone convention
 
 | Field | Java type / JSON | Client or server | Meaning |
 | --- | --- | --- | --- |
@@ -407,7 +410,7 @@ All aggregate fields are non-null and no matching data yields zeros plus `evolut
 | Statistics parameters/response dates | `LocalDate` / `YYYY-MM-DD` | Client query / server response | Calendar intervals derived from `startedAt` |
 | Statistics evolution point `date` | `LocalDate` / `YYYY-MM-DD` | Server | `DATE(started_at)` |
 
-The backend declares no timezone, offset, UTC normalization, or user-zone convention. All `LocalDateTime` values are unspecified local times. Angular must not label them as UTC or use offset arithmetic without a product-level convention.
+The existing browser fields retain their local wall-time meaning and no offset. New mobile-created workouts additionally carry nullable `startedAtInstant`, `completedAtInstant` (UTC ISO strings) and `calendarZone` (IANA ID); legacy rows have null values. Angular can continue using its existing local fields unchanged. Statistics still group by the local `startedAt` date, which for mobile-created workouts is derived from the captured calendar zone. Do not interpret legacy local timestamps as UTC.
 
 ## 10. Unsupported Operations Relevant to Angular
 

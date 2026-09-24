@@ -33,6 +33,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -1828,6 +1829,91 @@ class WorkoutControllerIntegrationTest {
         }
 
         assertEquals(1, workoutRepository.count());
+        assertNull(workoutRepository.findAll().getFirst().getStartedAtInstant());
+    }
+
+    @Test
+    void mobileInstantsRoundTripAcrossDstAndGroupByCapturedCalendarZone() throws Exception {
+        User user = createUser("mobile-time@test.com");
+        Routine routine = createRoutine(user.getId(), "DST routine", null);
+        String bearer = "Bearer " + jwtService.generateToken(user.getId());
+        long epochMillis = Instant.parse("2026-10-25T00:30:00Z").toEpochMilli();
+        String started = Instant.ofEpochMilli(epochMillis).toString();
+        String first = """
+                { "clientId": "%s", "routineId": "%s", "startedAt": "%s",
+                  "completedAt": "2026-10-25T01:30:00Z", "calendarZone": "Europe/Madrid" }
+                """.formatted(UUID.randomUUID(), routine.getId(), started);
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON).content(first))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.startedAtInstant").value("2026-10-25T00:30:00Z"))
+                .andExpect(jsonPath("$.completedAtInstant").value("2026-10-25T01:30:00Z"))
+                .andExpect(jsonPath("$.startedAt").value("2026-10-25T02:30:00"))
+                .andExpect(jsonPath("$.completedAt").value("2026-10-25T02:30:00"))
+                .andExpect(jsonPath("$.calendarZone").value("Europe/Madrid"));
+        Workout saved = workoutRepository.findAll().getFirst();
+        assertEquals(Instant.ofEpochMilli(epochMillis), saved.getStartedAtInstant());
+        assertEquals("Europe/Madrid", saved.getCalendarZone());
+        mockMvc.perform(get("/api/workouts/{id}", saved.getId()).header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.startedAtInstant").value(started));
+
+        String monday = """
+                { "routineId": "%s", "startedAt": "2026-10-26T00:30:00Z",
+                  "calendarZone": "Europe/Madrid" }
+                """.formatted(routine.getId());
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON).content(monday))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.startedAt").value("2026-10-26T01:30:00"));
+        mockMvc.perform(get("/api/statistics/summary?from=2026-10-25&to=2026-10-25")
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.workouts").value(1));
+        mockMvc.perform(get("/api/statistics/summary?from=2026-10-26&to=2026-11-01")
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.workouts").value(1));
+        mockMvc.perform(get("/api/statistics/evolution?from=2026-10-25&to=2026-10-26")
+                        .header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].date").value("2026-10-25"))
+                .andExpect(jsonPath("$.data[1].date").value("2026-10-26"));
+    }
+
+    @Test
+    void mobileWorkoutRejectsInvalidZoneAndReverseInstants() throws Exception {
+        User user = createUser("mobile-invalid-time@test.com");
+        Routine routine = createRoutine(user.getId(), "Invalid time routine", null);
+        String bearer = "Bearer " + jwtService.generateToken(user.getId());
+        String body = """
+                { "routineId": "%s", "startedAt": "2026-10-25T01:30:00Z",
+                  "completedAt": "2026-10-25T00:30:00Z", "calendarZone": "Europe/Madrid" }
+                """.formatted(routine.getId());
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON).content(body.replace("Europe/Madrid", "Invalid/Zone")))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON).content(body.replace("Europe/Madrid", "+02:00")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void mobileOffsetTimestampNormalizesToUtcAndUsesCapturedTravelZone() throws Exception {
+        User user = createUser("mobile-offset@test.com");
+        Routine routine = createRoutine(user.getId(), "Travel routine", null);
+        String body = """
+                { "routineId": "%s", "startedAt": "2026-06-01T01:30:00+02:00",
+                  "calendarZone": "America/New_York" }
+                """.formatted(routine.getId());
+        mockMvc.perform(post("/api/workouts/mobile")
+                        .header("Authorization", "Bearer " + jwtService.generateToken(user.getId()))
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.startedAtInstant").value("2026-05-31T23:30:00Z"))
+                .andExpect(jsonPath("$.startedAt").value("2026-05-31T19:30:00"))
+                .andExpect(jsonPath("$.calendarZone").value("America/New_York"));
     }
 
     @Test

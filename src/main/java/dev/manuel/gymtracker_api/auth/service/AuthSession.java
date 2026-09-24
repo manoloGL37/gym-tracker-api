@@ -9,4 +9,9 @@ public record AuthSession(
         String refreshToken,
         Instant refreshExpiresAt
 ) {
+    @Override
+    public String toString() {
+        return "AuthSession[response=" + response + ", refreshToken=REDACTED, refreshExpiresAt="
+                + refreshExpiresAt + "]";
+    }
 }

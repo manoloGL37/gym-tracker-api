@@ -2,6 +2,8 @@ package dev.manuel.gymtracker_api.auth.controller;
 
 import dev.manuel.gymtracker_api.auth.dto.AuthResponse;
 import dev.manuel.gymtracker_api.auth.dto.LoginRequest;
+import dev.manuel.gymtracker_api.auth.dto.MobileAuthResponse;
+import dev.manuel.gymtracker_api.auth.dto.MobileRefreshRequest;
 import dev.manuel.gymtracker_api.auth.service.AuthService;
 import dev.manuel.gymtracker_api.auth.service.AuthSession;
 import dev.manuel.gymtracker_api.auth.service.RefreshCookieService;
@@ -48,6 +50,39 @@ public class AuthController {
         return writeSession(authService.login(request), response);
     }
 
+    @PostMapping("/mobile/login")
+    @Operation(summary = "Native mobile sign in", description = "Returns an access JWT and an explicit opaque refresh credential. Does not set a refresh cookie.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Authentication successful"),
+            @ApiResponse(responseCode = "400", description = "Invalid request payload", content = @Content(schema = @Schema(implementation = ValidationErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Invalid credentials", content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<MobileAuthResponse> mobileLogin(@Valid @RequestBody LoginRequest request) {
+        return mobileSession(authService.login(request));
+    }
+
+    @PostMapping("/mobile/refresh")
+    @Operation(summary = "Rotate native mobile refresh credential", description = "Reads the credential from JSON, rotates within its existing family, and returns both new tokens. No cookie is read or set.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Refresh successful"),
+            @ApiResponse(responseCode = "400", description = "Invalid request payload", content = @Content(schema = @Schema(implementation = ValidationErrorResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Invalid, expired, revoked, or reused refresh credential", content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    public ResponseEntity<MobileAuthResponse> mobileRefresh(@Valid @RequestBody MobileRefreshRequest request) {
+        return mobileSession(authService.refresh(request.refreshToken()));
+    }
+
+    @PostMapping("/mobile/logout")
+    @Operation(summary = "Revoke native mobile session", description = "Revokes all active refresh credentials in the supplied token's family; safe to retry. No cookie is read or set.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Session revoked or already absent"),
+            @ApiResponse(responseCode = "400", description = "Invalid request payload", content = @Content(schema = @Schema(implementation = ValidationErrorResponse.class)))
+    })
+    public ResponseEntity<Void> mobileLogout(@Valid @RequestBody MobileRefreshRequest request) {
+        authService.logout(request.refreshToken());
+        return ResponseEntity.noContent().header(HttpHeaders.CACHE_CONTROL, "no-store").build();
+    }
+
     @PostMapping("/refresh")
     @SecurityRequirement(name = "refreshCookie")
     @Operation(summary = "Refresh access token", description = "Rotates the HttpOnly refresh cookie and returns a new access JWT. No request body is accepted.")
@@ -88,5 +123,10 @@ public class AuthController {
                 refreshCookieService.create(session.refreshToken(), session.refreshExpiresAt()).toString()
         );
         return session.response();
+    }
+
+    private ResponseEntity<MobileAuthResponse> mobileSession(AuthSession session) {
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(MobileAuthResponse.from(session));
     }
 }
