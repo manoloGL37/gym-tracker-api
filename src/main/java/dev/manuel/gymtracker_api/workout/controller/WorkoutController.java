@@ -1,6 +1,7 @@
 package dev.manuel.gymtracker_api.workout.controller;
 
 import dev.manuel.gymtracker_api.workout.dto.CreateWorkoutRequest;
+import dev.manuel.gymtracker_api.workout.dto.CreateMobileWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.UpdateWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.WorkoutResponse;
 import dev.manuel.gymtracker_api.workout.dto.WorkoutSetRequest;
@@ -103,5 +104,18 @@ public class WorkoutController {
             @AuthenticationPrincipal UUID userId,
             @Valid @RequestBody CreateWorkoutRequest request) {
         return workoutService.createWorkout(userId, request);
+    }
+
+    @PostMapping("/mobile")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Create workout with explicit instants and calendar zone", description = "Native clients send UTC/offset instants and an IANA zone for calendar grouping; legacy local fields remain available in responses.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Workout created or existing clientId returned"),
+            @ApiResponse(responseCode = "400", description = "Invalid instant, zone, or time order"),
+            @ApiResponse(responseCode = "404", description = "Routine not found")
+    })
+    public WorkoutResponse createMobileWorkout(@AuthenticationPrincipal UUID userId,
+            @Valid @RequestBody CreateMobileWorkoutRequest request) {
+        return workoutService.createMobileWorkout(userId, request);
     }
 }

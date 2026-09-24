@@ -78,6 +78,10 @@ public class AuthService {
                 .orElseThrow(InvalidRefreshTokenException::new);
         Instant now = Instant.now();
 
+        if (!current.getExpiresAt().isAfter(now)) {
+            refreshTokenRepository.revokeActiveFamily(current.getFamilyId(), now);
+            throw new InvalidRefreshTokenException();
+        }
         if (current.getRevokedAt() != null) {
             if (isConcurrentRotation(current, now)) {
                 return createSuccessor(current, now, false);
@@ -85,11 +89,6 @@ public class AuthService {
             refreshTokenRepository.revokeActiveFamily(current.getFamilyId(), now);
             throw new InvalidRefreshTokenException();
         }
-        if (!current.getExpiresAt().isAfter(now)) {
-            refreshTokenRepository.revokeActiveFamily(current.getFamilyId(), now);
-            throw new InvalidRefreshTokenException();
-        }
-
         return createSuccessor(current, now, true);
     }
 

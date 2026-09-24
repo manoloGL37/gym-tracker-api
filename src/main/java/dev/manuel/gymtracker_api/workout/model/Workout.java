@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
@@ -35,6 +36,15 @@ public class Workout {
 
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
+
+    @Column(name = "started_at_instant")
+    private Instant startedAtInstant;
+
+    @Column(name = "completed_at_instant")
+    private Instant completedAtInstant;
+
+    @Column(name = "calendar_zone", length = 100)
+    private String calendarZone;
 
     @Column(length = 500)
     private String notes;

@@ -24,6 +24,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import java.util.Map;
 import java.util.UUID;
 
 import jakarta.servlet.http.Cookie;
@@ -193,7 +197,11 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.info.title").value("Gym Tracker API"))
-                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"));
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+                .andExpect(jsonPath("$.paths['/api/auth/mobile/login'].post.requestBody.content['application/json']").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/mobile/refresh'].post.responses['200']").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/mobile/logout'].post.responses['204']").exists())
+                .andExpect(jsonPath("$.paths['/api/workouts/mobile'].post").exists());
 
         mockMvc.perform(get("/swagger-ui/index.html"))
                 .andExpect(status().isOk());
@@ -362,6 +370,124 @@ class AuthControllerIntegrationTest {
                         .header(ORIGIN, "https://attacker.example"))
                 .andExpect(status().isForbidden())
                 .andExpect(header().doesNotExist(ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
+    @Test
+    void mobileLoginAndRefreshUseHashedRotatingCredentialsWithoutCookies() throws Exception {
+        User user = userRepository.save(createUser("mobile@example.com", "password123"));
+        MvcResult login = mockMvc.perform(post("/api/auth/mobile/login")
+                        .contentType(APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest(user.getEmail(), "password123"))))
+                .andExpect(status().isOk())
+                .andExpect(header().string(CACHE_CONTROL, "no-store"))
+                .andExpect(header().doesNotExist(SET_COOKIE))
+                .andExpect(jsonPath("$.accessToken").isString())
+                .andExpect(jsonPath("$.refreshToken").isString())
+                .andExpect(jsonPath("$.refreshExpiresAt").isString())
+                .andReturn();
+        String first = objectMapper.readTree(login.getResponse().getContentAsString()).get("refreshToken").asText();
+        RefreshToken stored = refreshTokenRepository.findAll().getFirst();
+        String expectedHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(first.getBytes(StandardCharsets.UTF_8)));
+        org.junit.jupiter.api.Assertions.assertEquals(expectedHash, stored.getTokenHash());
+        org.junit.jupiter.api.Assertions.assertFalse(stored.getTokenHash().contains(first));
+
+        MvcResult rotated = mobileRefresh(first).andExpect(status().isOk())
+                .andExpect(header().doesNotExist(SET_COOKIE)).andReturn();
+        String second = objectMapper.readTree(rotated.getResponse().getContentAsString()).get("refreshToken").asText();
+        org.junit.jupiter.api.Assertions.assertNotEquals(first, second);
+        String secondHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(second.getBytes(StandardCharsets.UTF_8)));
+        org.junit.jupiter.api.Assertions.assertEquals(stored.getFamilyId(), refreshTokenRepository.findAll().stream()
+                .filter(token -> token.getTokenHash().equals(secondHash))
+                .findFirst().orElseThrow().getFamilyId());
+        org.junit.jupiter.api.Assertions.assertEquals(stored.getExpiresAt(), refreshTokenRepository.findAll().stream()
+                .filter(token -> token.getRevokedAt() == null).findFirst().orElseThrow().getExpiresAt());
+
+        mockMvc.perform(post("/api/auth/mobile/logout").contentType(APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("refreshToken", second))))
+                .andExpect(status().isNoContent()).andExpect(header().doesNotExist(SET_COOKIE));
+        mockMvc.perform(post("/api/auth/mobile/logout").contentType(APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("refreshToken", second))))
+                .andExpect(status().isNoContent());
+        mobileRefresh(second).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+    }
+
+    @Test
+    void mobileRefreshKeepsConcurrentSuccessorsAndRejectsReplayAfterGrace() throws Exception {
+        User user = userRepository.save(createUser("mobile-concurrent@example.com", "password123"));
+        String original = mobileLoginToken(user.getEmail());
+        String first = objectMapper.readTree(mobileRefresh(original).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString()).get("refreshToken").asText();
+        String second = objectMapper.readTree(mobileRefresh(original).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString()).get("refreshToken").asText();
+        org.junit.jupiter.api.Assertions.assertNotEquals(first, second);
+        mobileRefresh(first).andExpect(status().isOk());
+        mobileRefresh(second).andExpect(status().isOk());
+        RefreshToken old = refreshTokenRepository.findAll().stream()
+                .filter(token -> token.getReplacedByTokenId() != null).findFirst().orElseThrow();
+        old.setRevokedAt(Instant.now().minusSeconds(11));
+        refreshTokenRepository.save(old);
+        mobileRefresh(original).andExpect(status().isUnauthorized());
+        mobileRefresh(first).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void mobileFailuresAreDefinitiveAndSessionsAreIndependent() throws Exception {
+        User user = userRepository.save(createUser("mobile-isolation@example.com", "password123"));
+        mockMvc.perform(post("/api/auth/mobile/login").contentType(APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest(user.getEmail(), "wrong"))))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+        String first = mobileLoginToken(user.getEmail());
+        String second = mobileLoginToken(user.getEmail());
+        String web = loginAndGetRefreshToken(user.getEmail(), "password123");
+        org.junit.jupiter.api.Assertions.assertEquals(3, refreshTokenRepository.findAll().size());
+        mockMvc.perform(post("/api/auth/mobile/logout").contentType(APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("refreshToken", first)))).andExpect(status().isNoContent());
+        mobileRefresh(second).andExpect(status().isOk());
+        mockMvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", web)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").doesNotExist());
+        String invalid = "fake-secret-never-in-error-body";
+        MvcResult failure = mobileRefresh(invalid).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN")).andReturn();
+        org.junit.jupiter.api.Assertions.assertFalse(failure.getResponse().getContentAsString().contains(invalid));
+    }
+
+    @Test
+    void mobileExpiredTokenFailsWithoutCookie() throws Exception {
+        User user = userRepository.save(createUser("mobile-expired@example.com", "password123"));
+        String token = mobileLoginToken(user.getEmail());
+        RefreshToken stored = refreshTokenRepository.findAll().getFirst();
+        stored.setExpiresAt(Instant.now().minusSeconds(1));
+        refreshTokenRepository.save(stored);
+        mobileRefresh(token).andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist(SET_COOKIE));
+    }
+
+    @Test
+    void mobileGraceCannotExtendAbsoluteSessionExpiry() throws Exception {
+        User user = userRepository.save(createUser("mobile-grace-expired@example.com", "password123"));
+        String original = mobileLoginToken(user.getEmail());
+        mobileRefresh(original).andExpect(status().isOk());
+        for (RefreshToken token : refreshTokenRepository.findAll()) {
+            token.setExpiresAt(Instant.now().minusSeconds(1));
+            refreshTokenRepository.save(token);
+        }
+        mobileRefresh(original).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions mobileRefresh(String token) throws Exception {
+        return mockMvc.perform(post("/api/auth/mobile/refresh").contentType(APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("refreshToken", token))));
+    }
+
+    private String mobileLoginToken(String email) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/auth/mobile/login").contentType(APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new LoginRequest(email, "password123"))))
+                .andExpect(status().isOk()).andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString()).get("refreshToken").asText();
     }
 
     private String loginAndGetRefreshToken(String email, String password) throws Exception {

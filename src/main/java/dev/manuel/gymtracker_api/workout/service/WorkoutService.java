@@ -6,6 +6,7 @@ import dev.manuel.gymtracker_api.routine.model.RoutineExercise;
 import dev.manuel.gymtracker_api.routine.repository.RoutineExerciseRepository;
 import dev.manuel.gymtracker_api.routine.repository.RoutineRepository;
 import dev.manuel.gymtracker_api.workout.dto.CreateWorkoutRequest;
+import dev.manuel.gymtracker_api.workout.dto.CreateMobileWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.UpdateWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.WorkoutExerciseResponse;
 import dev.manuel.gymtracker_api.workout.dto.WorkoutResponse;
@@ -27,6 +28,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,6 +62,27 @@ public class WorkoutService {
         public WorkoutResponse createWorkout(
                         UUID userId,
                         CreateWorkoutRequest request) {
+                return createWorkout(userId, request, null, null, null);
+        }
+
+        @Transactional
+        public WorkoutResponse createMobileWorkout(UUID userId, CreateMobileWorkoutRequest request) {
+                if (!ZoneId.getAvailableZoneIds().contains(request.calendarZone())) {
+                        throw new IllegalArgumentException("calendarZone must be a valid IANA zone ID");
+                }
+                ZoneId zone = ZoneId.of(request.calendarZone());
+                if (request.completedAt() != null && request.completedAt().isBefore(request.startedAt())) {
+                        throw new IllegalArgumentException("completedAt must not be before startedAt");
+                }
+                return createWorkout(userId, new CreateWorkoutRequest(
+                                request.clientId(), request.routineId(),
+                                LocalDateTime.ofInstant(request.startedAt(), zone),
+                                request.completedAt() == null ? null : LocalDateTime.ofInstant(request.completedAt(), zone),
+                                request.notes()), request.startedAt(), request.completedAt(), zone.getId());
+        }
+
+        private WorkoutResponse createWorkout(UUID userId, CreateWorkoutRequest request,
+                        Instant startedAtInstant, Instant completedAtInstant, String calendarZone) {
 
                 Routine routine = routineRepository
                                 .findByIdAndUserIdAndDeletedAtIsNull(
@@ -84,7 +108,7 @@ public class WorkoutService {
                                 ? request.startedAt()
                                 : now;
 
-                if (request.completedAt() != null && request.completedAt().isBefore(startedAt)) {
+                if (startedAtInstant == null && request.completedAt() != null && request.completedAt().isBefore(startedAt)) {
                         throw new IllegalArgumentException("completedAt must not be before startedAt");
                 }
 
@@ -96,6 +120,9 @@ public class WorkoutService {
                 workout.setRoutineId(routine.getId());
                 workout.setStartedAt(startedAt);
                 workout.setCompletedAt(request.completedAt());
+                workout.setStartedAtInstant(startedAtInstant);
+                workout.setCompletedAtInstant(completedAtInstant);
+                workout.setCalendarZone(calendarZone);
                 workout.setNotes(request.notes());
                 workout.setCreatedAt(now);
 
@@ -240,10 +267,14 @@ public class WorkoutService {
                                                 workoutId));
 
                 if (request.completed() != null) {
-                        workout.setCompletedAt(
-                                        request.completed()
-                                                        ? LocalDateTime.now()
-                                                        : null);
+                        if (workout.getCalendarZone() != null) {
+                                Instant completed = request.completed() ? Instant.now() : null;
+                                workout.setCompletedAtInstant(completed);
+                                workout.setCompletedAt(completed == null ? null :
+                                                LocalDateTime.ofInstant(completed, ZoneId.of(workout.getCalendarZone())));
+                        } else {
+                                workout.setCompletedAt(request.completed() ? LocalDateTime.now() : null);
+                        }
                 }
 
                 if (request.notes() != null) {
@@ -337,6 +368,9 @@ public class WorkoutService {
                                 workout.getCompletedAt(),
                                 workout.getNotes(),
                                 exerciseResponses,
-                                workout.getCreatedAt());
+                                workout.getCreatedAt(),
+                                workout.getStartedAtInstant(),
+                                workout.getCompletedAtInstant(),
+                                workout.getCalendarZone());
         }
 }
