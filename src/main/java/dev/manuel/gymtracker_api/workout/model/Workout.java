@@ -31,6 +31,9 @@ public class Workout {
     @Column(name = "routine_id")
     private UUID routineId;
 
+    @Column(name = "name_snapshot", length = 150)
+    private String nameSnapshot;
+
     @Column(name = "started_at", nullable = false)
     private LocalDateTime startedAt;
 

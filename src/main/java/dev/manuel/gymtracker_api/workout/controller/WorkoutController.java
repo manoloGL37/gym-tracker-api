@@ -58,7 +58,7 @@ public class WorkoutController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Get a workout")
+    @Operation(summary = "Get a workout", description = "Returns persisted historical names, ordered exercises and sets, notes, client/server IDs, and exact instants/zone for mobile workouts. Legacy instant and snapshot names may be null when unrecoverable; local timestamps are not assumed UTC.")
     @ApiResponse(responseCode = "404", description = "Workout not found")
     public WorkoutResponse getWorkout(
             @AuthenticationPrincipal UUID userId,
@@ -67,7 +67,7 @@ public class WorkoutController {
     }
 
     @GetMapping
-    @Operation(summary = "List workouts", description = "Returns workout sessions ordered by creation date, with pagination.")
+    @Operation(summary = "List workouts", description = "Returns caller workouts ordered by creation date with pagination. Existing exercise/set graph remains for browser compatibility; nameSnapshot and exerciseNameSnapshot are persisted historical display text.")
     @ApiResponse(responseCode = "200", description = "Paginated workouts")
     public Page<WorkoutResponse> getWorkouts(
             @AuthenticationPrincipal UUID userId,
@@ -94,7 +94,7 @@ public class WorkoutController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Create a workout")
+    @Operation(summary = "Create a workout", description = "Browser contract: copies the current caller-owned routine exercise rows and available display names into a workout snapshot. Retrying the same user/clientId returns the existing workout.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Workout created"),
             @ApiResponse(responseCode = "400", description = "Invalid request payload"),
@@ -108,11 +108,11 @@ public class WorkoutController {
 
     @PostMapping("/mobile")
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Create workout with explicit instants and calendar zone", description = "Native clients send UTC/offset instants and an IANA zone for calendar grouping; legacy local fields remain available in responses.")
+    @Operation(summary = "Import the performed mobile workout snapshot", description = "The submitted name, ordered exercises and completed sets are authoritative. Source routine/exercise IDs are optional owned references, including soft-deleted sources. Instants are exact UTC/offset values and calendarZone is an IANA zone for local dates. The same user/clientId returns the existing complete workout without duplicating children.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Workout created or existing clientId returned"),
-            @ApiResponse(responseCode = "400", description = "Invalid instant, zone, or time order"),
-            @ApiResponse(responseCode = "404", description = "Routine not found")
+            @ApiResponse(responseCode = "400", description = "Invalid snapshot, instant, zone, time order or duplicate position/clientId/set number"),
+            @ApiResponse(responseCode = "404", description = "Referenced routine or exercise absent or not owned/visible")
     })
     public WorkoutResponse createMobileWorkout(@AuthenticationPrincipal UUID userId,
             @Valid @RequestBody CreateMobileWorkoutRequest request) {

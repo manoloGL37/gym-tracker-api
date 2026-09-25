@@ -248,7 +248,7 @@ All workout routes require JWT; a workout belongs to the JWT subject. There is n
 | `completedAt` | ISO local date-time | Optional/null | client value allowed only when it is not before effective `startedAt`; invalid relation => `400 INVALID_REQUEST` |
 | `notes` | string | Optional/null | max 500 |
 
-It returns `201 WorkoutResponse`. The server creates a snapshot of every current routine exercise, copying `exerciseId`, `position`, and routine-exercise `notes`. It does not copy routine `sets`, `targetReps`, or `restSeconds`. Retrying a POST with the same caller `clientId` returns the existing workout (still status 201 by controller annotation).
+It returns `201 WorkoutResponse`. The server creates a snapshot of every current routine exercise, copying `exerciseId`, `position`, routine-exercise `notes`, the routine name, and an available exercise translation name (English preferred, then first language alphabetically). It does not copy routine `sets`, `targetReps`, or `restSeconds`. Retrying a POST with the same caller `clientId` returns the existing workout (still status 201 by controller annotation).
 
 ### Read/history
 
@@ -257,9 +257,11 @@ It returns `201 WorkoutResponse`. The server creates a snapshot of every current
 | `GET /api/workouts/{id}` | `200 WorkoutResponse` | Caller-owned workout only; `404` absent/foreign. Exercises ordered `position ASC`; each set ordered `setNumber ASC`. |
 | `GET /api/workouts?page=&size=&sort=` | `200 Page<WorkoutResponse>` | Caller-owned history, no date/completion filter. Default page 0/size 10. Service ignores requested sort and uses `createdAt DESC, id ASC`. Every item includes exercises and sets. Spring Page shape is exactly the routine list page shape above. |
 
+Both routes expose persisted `nameSnapshot` and `exercises[].exerciseNameSnapshot`; browser clients may continue using all existing fields. V15 backfills existing rows from currently available routine names and exercise translations. Because earlier names were not stored, this is best effort; `null` means no text was recoverable. Source IDs remain references, while snapshots are the historical display text. Source Exercise and Routine soft deletion does not remove the workout. Legacy `LocalDateTime` fields remain local wall times with unknown original zone.
+
 ### Add exercises and sets
 
-Adding a workout exercise directly is **not supported by the current API**. Workout exercises are only created as the routine snapshot during `POST /api/workouts`.
+Adding a workout exercise to an existing workout is **not supported by the current API**. The browser `POST /api/workouts` creates rows from the routine; native `POST /api/workouts/mobile` creates them from its submitted snapshot.
 
 `POST /api/workouts/{workoutId}/exercises/{workoutExerciseId}/sets` accepts `WorkoutSetRequest` and returns `201 WorkoutSetResponse`:
 
@@ -301,10 +303,13 @@ interface WorkoutResponse {
   startedAtInstant: string | null; // UTC ISO instant for mobile-created workouts
   completedAtInstant: string | null;
   calendarZone: string | null;     // captured IANA zone for mobile-created workouts
+  nameSnapshot: string | null;     // persisted historical workout name
 }
 interface WorkoutExerciseResponse {
   id: string;                    // server-generated
-  exerciseId: string;
+  exerciseId: string | null;
+  clientId: string | null;         // mobile exercise row reconciliation
+  exerciseNameSnapshot: string | null; // persisted historical display name
   position: number;              // copied from routine; 0-based convention
   notes: string | null;          // copied from routine at creation
   sets: WorkoutSetResponse[];    // may be []
@@ -422,7 +427,7 @@ The existing browser fields retain their local wall-time meaning and no offset. 
 - Delete a workout: **Not supported by the current API.**
 - Clear workout notes through PATCH: **Not supported by the current API.**
 - Set arbitrary `completedAt` through PATCH: **Not supported by the current API.**
-- Arbitrary historical workout snapshot import (one whose exercises do not match a server-migrable routine): **Not supported by the current API.**
+- Arbitrary historical workout snapshot import: **Supported by `POST /api/workouts/mobile`** with a complete performed snapshot and optional routine reference.
 - Bulk migration/import endpoint: **Not supported by the current API.**
 - Workout history filters by date or active/completed state: **Not supported by the current API.**
 

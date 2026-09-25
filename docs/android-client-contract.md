@@ -138,7 +138,44 @@ RoutineSummaryResponse = Omit<RoutineResponse, 'exercises'>
 
 ## 5. Entrenamientos
 
-Todos requieren bearer. El estado activo se deriva de `completedAt === null`; no hay booleano de estado ni filtro/listado de activos. Crear un entrenamiento exige una rutina propia no borrada y genera un snapshot de todos sus ejercicios actuales: copia `exerciseId`, `position` y `notes`; **no** copia `sets`, `targetReps` ni `restSeconds`. No se puede añadir un ejercicio directamente a un entrenamiento.
+### Snapshot histórico nativo (contrato vigente)
+
+`POST /api/workouts/mobile` recibe **el entrenamiento realmente realizado**, no una orden para reconstruirlo a partir de la rutina actual. `clientId`, `nameSnapshot`, `startedAt`, `completedAt`, `calendarZone` y `exercises` son obligatorios. `routineId` es opcional; si se envía debe pertenecer al usuario autenticado, incluso si la rutina está soft deleted. No se consultan sus ejercicios para construir el workout. `completedAt` debe ser igual o posterior a `startedAt`. La zona debe ser un ID IANA.
+
+```json
+{
+  "clientId": "00000000-0000-4000-8000-000000000001",
+  "routineId": null,
+  "nameSnapshot": "Push A",
+  "startedAt": "2026-06-01T08:00:00Z",
+  "completedAt": "2026-06-01T09:00:00Z",
+  "calendarZone": "Europe/Madrid",
+  "notes": "Buena sesión",
+  "exercises": [
+    {
+      "clientId": "00000000-0000-4000-8000-000000000002",
+      "exerciseId": null,
+      "exerciseNameSnapshot": "Bench Press",
+      "position": 0,
+      "notes": null,
+      "sets": [
+        { "clientId": "00000000-0000-4000-8000-000000000003", "setNumber": 1, "weight": 80, "reps": 10, "rpe": null },
+        { "setNumber": 2, "weight": 80, "reps": 8 }
+      ]
+    }
+  ]
+}
+```
+
+`exercises` puede ser `[]` y admite hasta 50 elementos. Cada fila exige nombre no blanco (máx. 255), posición >= 0 única, `sets` no nulo y notas de hasta 500 caracteres. Cada set utiliza las mismas restricciones que `WorkoutSetRequest`: `setNumber` >= 1 y único en su ejercicio, peso entre 0 y 9999.99, repeticiones >= 1 y RPE opcional entre 0 y 10. Los `clientId` no nulos de ejercicios y sets deben ser únicos en el request. `exerciseId` es opcional; si se envía debe ser global o propio, y se acepta soft deleted. IDs de otro usuario o inexistentes devuelven 404. El cuerpo no contiene userId: se usa el JWT.
+
+Los nombres snapshot son valores de visualización históricos e inmutables. `routineId` y `exerciseId` sirven para vinculación y estadísticas, no para mostrar el nombre ni determinar el contenido. `GET /api/workouts/{id}` devuelve `nameSnapshot`, `exercises[].exerciseNameSnapshot`, `exercises[].clientId`, IDs de servidor, notas, orden, sets y tiempos sin buscar catálogo. `GET /api/workouts` mantiene por compatibilidad el grafo completo, incluido `nameSnapshot`; Android puede usar ese nombre para la lista y el detalle para importar la sesión completa. El mismo `clientId` de workout del mismo usuario devuelve el workout ya guardado, con sus hijos originales, y no inserta duplicados. Reutilizar exactamente el payload en cada retry.
+
+`POST /api/workouts` web conserva su contrato: crea desde la rutina actual y copia los nombres disponibles al snapshot en ese momento. Los workouts anteriores a V15 reciben backfill con el nombre **actual** de rutina y la traducción de ejercicio disponible (preferencia `en`, luego primer idioma alfabético). Ese nombre no garantiza el nombre real en la fecha pasada. Si ya no existe texto recuperable, el snapshot es `null`; Android debe aplicar su fallback heredado. La migración no fabrica una zona ni un instante para registros antiguos.
+
+La API de Routine y Exercise usa soft delete: la fila fuente permanece y su FK se conserva para estadísticas y trazabilidad. Las FK actuales bloquean el borrado físico de fuentes todavía referenciadas; V15 no las elimina. Las filas de workout móvil pueden tener `routineId`/`exerciseId` nulos y siempre conservan sus nombres snapshot. Por ello una baja lógica o renombrado de la fuente no cambia el historial. El borrado físico de fuentes referenciadas requeriría una migración explícita de integridad, fuera de este contrato.
+
+Todos requieren bearer. El estado activo se deriva de `completedAt === null`; no hay booleano de estado ni filtro/listado de activos. `POST /api/workouts` web exige una rutina propia no borrada y genera un snapshot de todos sus ejercicios actuales: copia `exerciseId`, `position`, `notes` y nombres disponibles; **no** copia `sets`, `targetReps` ni `restSeconds`. No se puede añadir un ejercicio a un entrenamiento ya creado.
 
 ```ts
 CreateWorkoutRequest = {
@@ -149,9 +186,10 @@ WorkoutResponse = {
   id: UUID, clientId: UUID | null, routineId: UUID | null,
   startedAt: LocalDateTime, completedAt: LocalDateTime | null,
   startedAtInstant: Instant | null, completedAtInstant: Instant | null,
-  calendarZone: string | null,
+  calendarZone: string | null, nameSnapshot: string | null,
   notes: string | null, createdAt: LocalDateTime,
-  exercises: { id: UUID, exerciseId: UUID, position: number, notes: string | null,
+  exercises: { id: UUID, clientId: UUID | null, exerciseId: UUID | null,
+    exerciseNameSnapshot: string | null, position: number, notes: string | null,
     sets: { id: UUID, clientId: UUID | null, setNumber: number,
       weight: decimal, reps: number, rpe: decimal | null }[] }[]
 }
@@ -164,8 +202,8 @@ UpdateWorkoutRequest = { completed?: boolean, notes?: string }
 | Método/ruta | Resultado |
 | --- | --- |
 | `POST /api/workouts` | `201 WorkoutResponse`; inicia o importa una sesión histórica basada en snapshot de rutina. |
-| `POST /api/workouts/mobile` | `201 WorkoutResponse`; crea/importa con instantes explícitos y zona de calendario capturada. |
-| `GET /api/workouts?page=&size=&sort=` | `200 Page<WorkoutResponse>`; todos los entrenamientos propios, sin filtros fecha/estado; orden efectivo `createdAt DESC, id ASC`. Incluye ejercicios y sets. |
+| `POST /api/workouts/mobile` | `201 WorkoutResponse`; persiste snapshot completo de nombre, ejercicios y sets con instantes exactos y zona capturada. |
+| `GET /api/workouts?page=&size=&sort=` | `200 Page<WorkoutResponse>`; todos los entrenamientos propios, sin filtros fecha/estado; orden efectivo `createdAt DESC, id ASC`. Incluye ejercicios, sets y nombres snapshot persistidos. |
 | `GET /api/workouts/{id}` | `200 WorkoutResponse` propio; ejercicios `position ASC`, sets `setNumber ASC`; si no, `404`. |
 | `POST /api/workouts/{workoutId}/exercises/{workoutExerciseId}/sets` | `201 WorkoutSetResponse`. El ejercicio hijo debe pertenecer al entrenamiento propio. `setNumber` es 1-based, único por ejercicio; duplicado sin mismo `clientId`: `400 DUPLICATE_WORKOUT_SET_NUMBER`. `weight` 0.00--9999.99, `reps >=1`, `rpe` opcional 0.0--10.0. `clientId` estable por workout-exercise devuelve el set existente con `201`. |
 | `PATCH /api/workouts/{id}` | `200`. `completed:true` asigna hora actual del servidor; `completed:false` borra `completedAt`; omitido/null no cambia. `notes` sólo se reemplaza si no es null. |
@@ -187,32 +225,9 @@ Todas requieren bearer. Los parámetros son `LocalDate` obligatorios `YYYY-MM-DD
 
 La API distingue un **instante real** de una **fecha de calendario**. Android guarda los momentos como milisegundos Unix: convertir con `Instant.ofEpochMilli(ms)` y serializar ISO-8601 con `Z`, por ejemplo `2026-10-25T00:30:00Z`. El backend acepta instantes ISO-8601 con `Z` u offset explícito y devuelve siempre UTC `Z` en los nuevos campos `*Instant`. No enviar epoch millis como número JSON ni convertirlos a `LocalDateTime` sin zona.
 
-Para sincronizar un entrenamiento nuevo, Android usa `POST /api/workouts/mobile` con bearer:
+Para sincronizar un entrenamiento nuevo, Android usa el cuerpo completo documentado en la sección 5. `startedAt` y `completedAt` son instantes exactos; `calendarZone` fija el día local histórico.
 
-```json
-{
-  "clientId": "00000000-0000-4000-8000-000000000001",
-  "routineId": "00000000-0000-4000-8000-000000000002",
-  "startedAt": "2026-10-25T00:30:00Z",
-  "completedAt": "2026-10-25T01:30:00Z",
-  "calendarZone": "Europe/Madrid",
-  "notes": "Ejemplo"
-}
-```
-
-`clientId`, `completedAt` y `notes` son opcionales. `routineId`, `startedAt` y `calendarZone` (ID IANA válido) son obligatorios. `completedAt` no puede ser anterior a `startedAt` como instante. El `clientId` conserva la idempotencia existente. La respuesta `201 WorkoutResponse` mantiene los campos locales web y añade `startedAtInstant`, `completedAtInstant` y `calendarZone`:
-
-```json
-{
-  "startedAt": "2026-10-25T02:30:00",
-  "completedAt": "2026-10-25T02:30:00",
-  "startedAtInstant": "2026-10-25T00:30:00Z",
-  "completedAtInstant": "2026-10-25T01:30:00Z",
-  "calendarZone": "Europe/Madrid"
-}
-```
-
-El ejemplo abrevia el resto de `WorkoutResponse`. En lectura/listado, Android **usa sólo `*Instant`** para momentos reales. `startedAt`/`completedAt` siguen siendo fechas-hora locales sin offset para Angular y para el calendario/estadísticas. La zona se captura al crear el entrenamiento: viajar después no mueve el día histórico. Para una sesión que cruza zonas, la zona de calendario es la seleccionada al inicio. El servidor convierte cada instante con esa zona al valor local de las columnas existentes; `DATE(started_at)` determina el día estadístico. Un cambio de horario de verano no altera el instante: dos instantes pueden tener la misma hora local durante el solapamiento; la comparación de finalización se hace por instantes. En el salto hacia adelante no se inventa una hora local inexistente.
+En lectura/listado, Android **usa sólo `*Instant`** para momentos reales. `startedAt`/`completedAt` siguen siendo fechas-hora locales sin offset para Angular y para el calendario/estadísticas. La zona se captura al crear el entrenamiento: viajar después no mueve el día histórico. Para una sesión que cruza zonas, la zona de calendario es la seleccionada al inicio. El servidor convierte cada instante con esa zona al valor local de las columnas existentes; `DATE(started_at)` determina el día estadístico. Un cambio de horario de verano no altera el instante: dos instantes pueden tener la misma hora local durante el solapamiento; la comparación de finalización se hace por instantes. En el salto hacia adelante no se inventa una hora local inexistente.
 
 Los filtros de estadísticas siguen siendo `LocalDate` `YYYY-MM-DD`, inclusivos; internamente `[from 00:00, (to + 1 día) 00:00)` sobre la fecha local capturada. Semana: lunes a domingo según fechas de calendario de cada workout. Mes: primer a último día de calendario. No se usan intervalos fijos de 24 horas para definir días, semanas o meses; esto evita errores DST. Si se agregan workouts de varias zonas, cada uno cuenta por su día de origen, no por la zona actual del teléfono.
 
@@ -227,6 +242,7 @@ La ruta web `POST /api/workouts` y sus campos `startedAt`/`completedAt` conserva
 | `POST /api/exercises` | Sí | usuario | Retorna el exercise existente; HTTP sigue siendo 201. |
 | `POST /api/routines` | Sí | usuario | Retorna la rutina existente; HTTP sigue siendo 201. |
 | `POST /api/workouts` | Sí | usuario | Retorna el workout existente; HTTP sigue siendo 201. |
+| `POST /api/workouts/mobile` | Obligatorio | usuario | Retorna el workout completo existente, incluidos hijos; HTTP sigue siendo 201. |
 | `POST .../sets` | Sí | workout exercise | Retorna el set existente; HTTP sigue siendo 201. |
 | Registro, login, refresh, logout | No | -- | No son operaciones de cola idempotentes. |
 | PUT/PATCH/DELETE | No explícito | -- | No hay ETag/versionado ni clave de idempotencia para mutaciones. |
@@ -239,21 +255,19 @@ Generar UUID v4 una sola vez antes de poner una creación en cola; persistirlo j
 | --- | --- | --- |
 | A. Seguras para retry en cola | POST exercise/routine/workout/set con `clientId` persistido | El servidor deduplica por la clave indicada. Resolver antes los IDs de dependencias. |
 | B. Seguras con condiciones | GETs; PUT rutina; PUT ejercicio; PATCH workout; DELETE exercise/routine; logout | Reintentar GET sólo ante red/5xx. Las mutaciones no tienen control de concurrencia/versionado: serializar por recurso, volver a leer tras fallo incierto y no reintentar DELETE tras un `404` como si fuera error. PUT rutina recrea hijos. PATCH no puede expresar limpiar notas ni timestamp final histórico. Logout móvil puede repetirse con su refresh credential. |
-| C. Inseguras / capacidad backend necesaria | Actualizar/borrar sets; actualizar/borrar/agregar workout exercises; borrar workouts; importar un workout con exercises que no proceden de una rutina sincronizada; sincronización de conflictos | No hay endpoint o contrato de idempotencia/versiones para estas necesidades. La sesión nativa usa los endpoints móviles de autenticación descritos arriba. |
+| C. Inseguras / capacidad backend necesaria | Actualizar/borrar sets; actualizar/borrar/agregar workout exercises después de crear; borrar workouts; sincronización de conflictos | No hay endpoint o contrato de idempotencia/versiones para estas necesidades. La sesión nativa usa los endpoints móviles de autenticación descritos arriba. |
 
 ## 10. Grafo de dependencias de sincronización
 
 ```text
-Exercise global (source/sourceId) o Exercise personalizado (clientId -> id)
-        ↓ exerciseId
-Routine (clientId -> id)
-        ↓ snapshot de sus RoutineExercise, al POST /workouts
-Workout (clientId -> id) ──→ WorkoutExercise IDs de servidor
-        ↓ workoutId + workoutExerciseId
-WorkoutSet (clientId -> id)
+Exercise global o personalizado sincronizado (opcional -> exerciseId)
+Routine sincronizada (opcional -> routineId)
+        ↓ referencias autorizadas
+Workout móvil (clientId -> id, snapshot completo en un POST)
+        ↓ devuelve IDs de ejercicio y set para reconciliación
 ```
 
-Un workout depende de una rutina propia no borrada, incluso al crear histórico. Sus workout exercises no son los IDs de routine exercises: son filas snapshot nuevas y sólo se conocen al recibir `WorkoutResponse`. Por ello no se puede encolar un set usando una clave local de routine exercise; hay que esperar al `workoutExerciseId` del snapshot y mapearlo por `exerciseId` + `position` (la combinación es única dentro del snapshot).
+Un workout móvil no depende de una rutina actual. Si se envía `routineId`, debe pertenecer al usuario, aunque esté soft deleted. Los `clientId` de workout, ejercicio y set permiten reconciliar los IDs devueltos. Los sets se crean con el workout en el mismo POST; no hace falta encolarlos por separado.
 
 ## 11. Semántica HTTP y manejo Android
 
@@ -279,7 +293,6 @@ Producción corre en Render (`https://gym-tracker-api-s70k.onrender.com`) y pued
 
 - Conversión de registros web heredados a instantes sólo tras conocer su zona original; sin ella deben conservarse como hora local.
 - Mutaciones de workout necesarias para edición offline: update/delete de sets, add/update/delete de workout exercises, delete de workout y actualización explícita de notas/completedAt según producto.
-- Creación/importación de workout con snapshot de exercises y sets autocontenidos, sin exigir una rutina previamente sincronizada.
 
 ### Deseables
 

@@ -3,7 +3,9 @@ package dev.manuel.gymtracker_api.workout.controller;
 import dev.manuel.gymtracker_api.auth.security.JwtService;
 import dev.manuel.gymtracker_api.exercise.model.Exercise;
 import dev.manuel.gymtracker_api.exercise.model.ExerciseSource;
+import dev.manuel.gymtracker_api.exercise.model.ExerciseTranslation;
 import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
+import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationRepository;
 import dev.manuel.gymtracker_api.routine.model.Routine;
 import dev.manuel.gymtracker_api.routine.model.RoutineExercise;
 import dev.manuel.gymtracker_api.routine.repository.RoutineExerciseRepository;
@@ -73,6 +75,9 @@ class WorkoutControllerIntegrationTest {
     private ExerciseRepository exerciseRepository;
 
     @Autowired
+    private ExerciseTranslationRepository exerciseTranslationRepository;
+
+    @Autowired
     private RoutineRepository routineRepository;
 
     @Autowired
@@ -100,6 +105,7 @@ class WorkoutControllerIntegrationTest {
         workoutRepository.deleteAll();
         routineExerciseRepository.deleteAll();
         routineRepository.deleteAll();
+        exerciseTranslationRepository.deleteAll();
         exerciseRepository.deleteAll();
         userRepository.deleteAll();
     }
@@ -1841,7 +1847,8 @@ class WorkoutControllerIntegrationTest {
         String started = Instant.ofEpochMilli(epochMillis).toString();
         String first = """
                 { "clientId": "%s", "routineId": "%s", "startedAt": "%s",
-                  "completedAt": "2026-10-25T01:30:00Z", "calendarZone": "Europe/Madrid" }
+                  "completedAt": "2026-10-25T01:30:00Z", "calendarZone": "Europe/Madrid",
+                  "nameSnapshot": "DST routine", "exercises": [] }
                 """.formatted(UUID.randomUUID(), routine.getId(), started);
         mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
                         .contentType(MediaType.APPLICATION_JSON).content(first))
@@ -1859,9 +1866,10 @@ class WorkoutControllerIntegrationTest {
                 .andExpect(jsonPath("$.startedAtInstant").value(started));
 
         String monday = """
-                { "routineId": "%s", "startedAt": "2026-10-26T00:30:00Z",
-                  "calendarZone": "Europe/Madrid" }
-                """.formatted(routine.getId());
+                { "clientId": "%s", "routineId": "%s", "startedAt": "2026-10-26T00:30:00Z",
+                  "completedAt": "2026-10-26T01:30:00Z", "calendarZone": "Europe/Madrid",
+                  "nameSnapshot": "DST routine", "exercises": [] }
+                """.formatted(UUID.randomUUID(), routine.getId());
         mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
                         .contentType(MediaType.APPLICATION_JSON).content(monday))
                 .andExpect(status().isCreated())
@@ -1885,9 +1893,10 @@ class WorkoutControllerIntegrationTest {
         Routine routine = createRoutine(user.getId(), "Invalid time routine", null);
         String bearer = "Bearer " + jwtService.generateToken(user.getId());
         String body = """
-                { "routineId": "%s", "startedAt": "2026-10-25T01:30:00Z",
-                  "completedAt": "2026-10-25T00:30:00Z", "calendarZone": "Europe/Madrid" }
-                """.formatted(routine.getId());
+                { "clientId": "%s", "routineId": "%s", "startedAt": "2026-10-25T01:30:00Z",
+                  "completedAt": "2026-10-25T00:30:00Z", "calendarZone": "Europe/Madrid",
+                  "nameSnapshot": "Invalid time routine", "exercises": [] }
+                """.formatted(UUID.randomUUID(), routine.getId());
         mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
                 .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
@@ -1904,9 +1913,10 @@ class WorkoutControllerIntegrationTest {
         User user = createUser("mobile-offset@test.com");
         Routine routine = createRoutine(user.getId(), "Travel routine", null);
         String body = """
-                { "routineId": "%s", "startedAt": "2026-06-01T01:30:00+02:00",
-                  "calendarZone": "America/New_York" }
-                """.formatted(routine.getId());
+                { "clientId": "%s", "routineId": "%s", "startedAt": "2026-06-01T01:30:00+02:00",
+                  "completedAt": "2026-06-01T02:30:00+02:00", "calendarZone": "America/New_York",
+                  "nameSnapshot": "Travel routine", "exercises": [] }
+                """.formatted(UUID.randomUUID(), routine.getId());
         mockMvc.perform(post("/api/workouts/mobile")
                         .header("Authorization", "Bearer " + jwtService.generateToken(user.getId()))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
@@ -1914,6 +1924,144 @@ class WorkoutControllerIntegrationTest {
                 .andExpect(jsonPath("$.startedAtInstant").value("2026-05-31T23:30:00Z"))
                 .andExpect(jsonPath("$.startedAt").value("2026-05-31T19:30:00"))
                 .andExpect(jsonPath("$.calendarZone").value("America/New_York"));
+    }
+
+    @Test
+    void mobileSnapshotSurvivesRoutineChangeExerciseRenameAndSoftDeletes() throws Exception {
+        User user = createUser("snapshot@test.com");
+        UUID a = createExercise(user.getId(), "Bench Press");
+        UUID b = createExercise(user.getId(), "Lateral Raise");
+        UUID c = createExercise(user.getId(), "Row");
+        UUID d = createExercise(user.getId(), "New Exercise");
+        Routine routine = createRoutine(user.getId(), "Push A", null);
+        createRoutineExercise(routine.getId(), a, 0, 2, 10, 60, null);
+        createRoutineExercise(routine.getId(), b, 1, 2, 15, 60, null);
+        createRoutineExercise(routine.getId(), c, 2, 2, 10, 60, null);
+        routineExerciseRepository.deleteAll();
+        createRoutineExercise(routine.getId(), a, 0, 2, 10, 60, null);
+        createRoutineExercise(routine.getId(), d, 1, 2, 15, 60, null);
+        createRoutineExercise(routine.getId(), c, 2, 2, 10, 60, null);
+        routine.setName("Push B");
+        routine.setDeletedAt(LocalDateTime.now());
+        routineRepository.save(routine);
+        String bearer = "Bearer " + jwtService.generateToken(user.getId());
+        UUID clientId = UUID.randomUUID();
+        UUID exerciseClientId = UUID.randomUUID();
+        UUID setClientId = UUID.randomUUID();
+        String body = """
+                { "clientId": "%s", "routineId": "%s", "nameSnapshot": "Push A",
+                  "startedAt": "2026-06-01T08:00:00Z", "completedAt": "2026-06-01T09:00:00Z",
+                  "calendarZone": "Europe/Madrid", "notes": "Good session", "exercises": [
+                    { "clientId": "%s", "exerciseId": "%s", "exerciseNameSnapshot": "Lateral Raise",
+                      "position": 1, "notes": "Slow", "sets": [
+                        { "clientId": "%s", "setNumber": 2, "weight": 10, "reps": 12 },
+                        { "setNumber": 1, "weight": 10, "reps": 15 }] },
+                    { "exerciseId": "%s", "exerciseNameSnapshot": "Bench Press", "position": 0,
+                      "sets": [{ "setNumber": 1, "weight": 80, "reps": 10 },
+                               { "setNumber": 2, "weight": 80, "reps": 8 }] },
+                    { "exerciseId": "%s", "exerciseNameSnapshot": "Row", "position": 2, "sets": [] }
+                  ] }
+                """.formatted(clientId, routine.getId(), exerciseClientId, b, setClientId, a, c);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.nameSnapshot").value("Push A"))
+                    .andExpect(jsonPath("$.exercises[0].exerciseNameSnapshot").value("Bench Press"))
+                    .andExpect(jsonPath("$.exercises[1].exerciseNameSnapshot").value("Lateral Raise"))
+                    .andExpect(jsonPath("$.exercises[1].clientId").value(exerciseClientId.toString()))
+                    .andExpect(jsonPath("$.exercises[1].sets[1].clientId").value(setClientId.toString()))
+                    .andExpect(jsonPath("$.exercises[1].sets[0].setNumber").value(1));
+        }
+        assertEquals(1, workoutRepository.count());
+        assertEquals(3, workoutExerciseRepository.count());
+        assertEquals(4, workoutSetRepository.count());
+        Workout saved = workoutRepository.findAll().getFirst();
+        Exercise renamed = exerciseRepository.findById(a).orElseThrow();
+        renamed.setDeletedAt(LocalDateTime.now());
+        exerciseRepository.save(renamed);
+        Exercise deleted = exerciseRepository.findById(b).orElseThrow();
+        deleted.setDeletedAt(LocalDateTime.now());
+        exerciseRepository.save(deleted);
+        mockMvc.perform(get("/api/workouts/{id}", saved.getId()).header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nameSnapshot").value("Push A"))
+                .andExpect(jsonPath("$.notes").value("Good session"))
+                .andExpect(jsonPath("$.startedAtInstant").value("2026-06-01T08:00:00Z"))
+                .andExpect(jsonPath("$.calendarZone").value("Europe/Madrid"))
+                .andExpect(jsonPath("$.exercises[0].exerciseNameSnapshot").value("Bench Press"))
+                .andExpect(jsonPath("$.exercises[0].sets[1].reps").value(8))
+                .andExpect(jsonPath("$.exercises[1].exerciseNameSnapshot").value("Lateral Raise"))
+                .andExpect(jsonPath("$.exercises[1].notes").value("Slow"));
+        mockMvc.perform(get("/api/workouts").header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].nameSnapshot").value("Push A"));
+    }
+
+    @Test
+    void browserWorkoutSnapshotsExistingNameAndKeepsItAfterRename() throws Exception {
+        User user = createUser("browser-snapshot@test.com");
+        UUID exerciseId = createExercise(user.getId(), "Bench Press");
+        ExerciseTranslation translation = new ExerciseTranslation();
+        translation.setId(UUID.randomUUID());
+        translation.setExerciseId(exerciseId);
+        translation.setLanguage("en");
+        translation.setName("Bench Press");
+        exerciseTranslationRepository.save(translation);
+        Routine routine = createRoutine(user.getId(), "Push A", null);
+        createRoutineExercise(routine.getId(), exerciseId, 0, 2, 10, 60, null);
+        String bearer = "Bearer " + jwtService.generateToken(user.getId());
+        mockMvc.perform(post("/api/workouts").header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"routineId\":\"" + routine.getId() + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nameSnapshot").value("Push A"))
+                .andExpect(jsonPath("$.exercises[0].exerciseNameSnapshot").value("Bench Press"));
+        translation.setName("Barbell Bench Press");
+        exerciseTranslationRepository.save(translation);
+        routine.setName("Push B");
+        routineRepository.save(routine);
+        Workout saved = workoutRepository.findAll().getFirst();
+        mockMvc.perform(get("/api/workouts/{id}", saved.getId()).header("Authorization", bearer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nameSnapshot").value("Push A"))
+                .andExpect(jsonPath("$.exercises[0].exerciseNameSnapshot").value("Bench Press"));
+    }
+
+    @Test
+    void mobileSnapshotRejectsForeignReferencesAndInvalidOrdering() throws Exception {
+        User owner = createUser("foreign-owner@test.com");
+        User caller = createUser("foreign-caller@test.com");
+        Routine foreignRoutine = createRoutine(owner.getId(), "Private", null);
+        UUID foreignExercise = createExercise(owner.getId(), "Private exercise");
+        String bearer = "Bearer " + jwtService.generateToken(caller.getId());
+        String valid = """
+                { "clientId": "%s", "nameSnapshot": "Own", "startedAt": "2026-06-01T08:00:00Z",
+                  "completedAt": "2026-06-01T09:00:00Z", "calendarZone": "Europe/Madrid",
+                  "exercises": [{ "exerciseNameSnapshot": "Own exercise", "position": 0, "sets": [] }] }
+                """.formatted(UUID.randomUUID());
+        String withRoutine = valid.replace("\"exercises\":", "\"routineId\": \"" + foreignRoutine.getId() + "\", \"exercises\":");
+        String withExercise = valid.replace("\"position\": 0", "\"exerciseId\": \"" + foreignExercise + "\", \"position\": 0");
+        for (String body : List.of(withRoutine, withExercise)) {
+            mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                    .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isNotFound());
+        }
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON).content(valid.replace("\"position\": 0", "\"position\": -1")))
+                .andExpect(status().isBadRequest());
+        String duplicate = valid.replace("\"sets\": []", "\"sets\": [" +
+                "{\"setNumber\":1,\"weight\":80,\"reps\":10}," +
+                "{\"setNumber\":1,\"weight\":80,\"reps\":8}]");
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON).content(duplicate))
+                .andExpect(status().isBadRequest());
+        assertEquals(0, workoutRepository.count());
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON).content(valid))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.routineId").isEmpty())
+                .andExpect(jsonPath("$.exercises[0].exerciseId").isEmpty())
+                .andExpect(jsonPath("$.exercises[0].exerciseNameSnapshot").value("Own exercise"));
     }
 
     @Test
