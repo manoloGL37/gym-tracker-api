@@ -1,12 +1,16 @@
 package dev.manuel.gymtracker_api.workout.service;
 
 import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
+import dev.manuel.gymtracker_api.exercise.model.Exercise;
+import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
+import dev.manuel.gymtracker_api.exercise.repository.ExerciseTranslationRepository;
 import dev.manuel.gymtracker_api.routine.model.Routine;
 import dev.manuel.gymtracker_api.routine.model.RoutineExercise;
 import dev.manuel.gymtracker_api.routine.repository.RoutineExerciseRepository;
 import dev.manuel.gymtracker_api.routine.repository.RoutineRepository;
 import dev.manuel.gymtracker_api.workout.dto.CreateWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.CreateMobileWorkoutRequest;
+import dev.manuel.gymtracker_api.workout.dto.MobileWorkoutExerciseRequest;
 import dev.manuel.gymtracker_api.workout.dto.UpdateWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.WorkoutExerciseResponse;
 import dev.manuel.gymtracker_api.workout.dto.WorkoutResponse;
@@ -32,6 +36,9 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.Comparator;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -43,26 +50,65 @@ public class WorkoutService {
         private final RoutineRepository routineRepository;
         private final RoutineExerciseRepository routineExerciseRepository;
         private final WorkoutSetRepository workoutSetRepository;
+        private final ExerciseRepository exerciseRepository;
+        private final ExerciseTranslationRepository exerciseTranslationRepository;
 
         public WorkoutService(
                         WorkoutRepository workoutRepository,
                         WorkoutExerciseRepository workoutExerciseRepository,
                         WorkoutSetRepository workoutSetRepository,
                         RoutineRepository routineRepository,
-                        RoutineExerciseRepository routineExerciseRepository) {
+                        RoutineExerciseRepository routineExerciseRepository,
+                        ExerciseRepository exerciseRepository,
+                        ExerciseTranslationRepository exerciseTranslationRepository) {
 
                 this.workoutRepository = workoutRepository;
                 this.workoutExerciseRepository = workoutExerciseRepository;
                 this.workoutSetRepository = workoutSetRepository;
                 this.routineRepository = routineRepository;
                 this.routineExerciseRepository = routineExerciseRepository;
+                this.exerciseRepository = exerciseRepository;
+                this.exerciseTranslationRepository = exerciseTranslationRepository;
         }
 
         @Transactional
         public WorkoutResponse createWorkout(
                         UUID userId,
                         CreateWorkoutRequest request) {
-                return createWorkout(userId, request, null, null, null);
+                if (request.clientId() != null) {
+                        Workout existingWorkout = workoutRepository
+                                        .findByUserIdAndClientId(userId, request.clientId())
+                                        .orElse(null);
+                        if (existingWorkout != null) {
+                                return toResponse(existingWorkout, workoutExerciseRepository
+                                                .findByWorkoutIdOrderByPositionAsc(existingWorkout.getId()));
+                        }
+                }
+
+                Routine routine = routineRepository
+                                .findByIdAndUserIdAndDeletedAtIsNull(request.routineId(), userId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Routine", request.routineId()));
+
+                LocalDateTime now = LocalDateTime.now();
+                LocalDateTime startedAt = request.startedAt() != null ? request.startedAt() : now;
+                if (request.completedAt() != null && request.completedAt().isBefore(startedAt)) {
+                        throw new IllegalArgumentException("completedAt must not be before startedAt");
+                }
+                Workout workout = new Workout();
+                workout.setId(UUID.randomUUID());
+                workout.setUserId(userId);
+                workout.setClientId(request.clientId());
+                workout.setRoutineId(routine.getId());
+                workout.setNameSnapshot(routine.getName());
+                workout.setStartedAt(startedAt);
+                workout.setCompletedAt(request.completedAt());
+                workout.setNotes(request.notes());
+                workout.setCreatedAt(now);
+                Workout savedWorkout = workoutRepository.save(workout);
+                List<WorkoutExercise> savedExercises = workoutExerciseRepository.saveAll(routineExerciseRepository
+                                .findByRoutineIdOrderByPositionAsc(routine.getId()).stream()
+                                .map(row -> toWorkoutExercise(savedWorkout.getId(), row)).toList());
+                return toResponse(savedWorkout, savedExercises);
         }
 
         @Transactional
@@ -71,80 +117,77 @@ public class WorkoutService {
                         throw new IllegalArgumentException("calendarZone must be a valid IANA zone ID");
                 }
                 ZoneId zone = ZoneId.of(request.calendarZone());
-                if (request.completedAt() != null && request.completedAt().isBefore(request.startedAt())) {
+                if (request.completedAt().isBefore(request.startedAt())) {
                         throw new IllegalArgumentException("completedAt must not be before startedAt");
                 }
-                return createWorkout(userId, new CreateWorkoutRequest(
-                                request.clientId(), request.routineId(),
-                                LocalDateTime.ofInstant(request.startedAt(), zone),
-                                request.completedAt() == null ? null : LocalDateTime.ofInstant(request.completedAt(), zone),
-                                request.notes()), request.startedAt(), request.completedAt(), zone.getId());
-        }
-
-        private WorkoutResponse createWorkout(UUID userId, CreateWorkoutRequest request,
-                        Instant startedAtInstant, Instant completedAtInstant, String calendarZone) {
-
-                Routine routine = routineRepository
-                                .findByIdAndUserIdAndDeletedAtIsNull(
-                                                request.routineId(),
-                                                userId)
-                                .orElseThrow(() -> new ResourceNotFoundException(
-                                                "Routine",
-                                                request.routineId()));
-
-                if (request.clientId() != null) {
-                        Workout existingWorkout = workoutRepository
-                                        .findByUserIdAndClientId(userId, request.clientId())
-                                        .orElse(null);
-
-                        if (existingWorkout != null) {
-                                return toResponse(existingWorkout, workoutExerciseRepository
-                                                .findByWorkoutIdOrderByPositionAsc(existingWorkout.getId()));
+                Workout existing = workoutRepository.findByUserIdAndClientId(userId, request.clientId()).orElse(null);
+                if (existing != null) {
+                        return toResponse(existing, workoutExerciseRepository.findByWorkoutIdOrderByPositionAsc(existing.getId()));
+                }
+                if (request.routineId() != null && routineRepository.findByIdAndUserId(request.routineId(), userId).isEmpty()) {
+                        throw new ResourceNotFoundException("Routine", request.routineId());
+                }
+                Set<Integer> positions = new HashSet<>();
+                Set<UUID> clientIds = new HashSet<>();
+                for (MobileWorkoutExerciseRequest exercise : request.exercises()) {
+                        if (!positions.add(exercise.position())) throw new IllegalArgumentException("Duplicate exercise position");
+                        if (exercise.clientId() != null && !clientIds.add(exercise.clientId())) throw new IllegalArgumentException("Duplicate exercise clientId");
+                        if (exercise.exerciseId() != null) {
+                                Exercise source = exerciseRepository.findById(exercise.exerciseId())
+                                                .orElseThrow(() -> new ResourceNotFoundException("Exercise", exercise.exerciseId()));
+                                if (source.getOwnerId() != null && !source.getOwnerId().equals(userId))
+                                        throw new ResourceNotFoundException("Exercise", exercise.exerciseId());
+                        }
+                        Set<Integer> setNumbers = new HashSet<>();
+                        for (WorkoutSetRequest set : exercise.sets()) {
+                                if (!setNumbers.add(set.setNumber())) throw new IllegalArgumentException("Duplicate set number");
+                                if (set.clientId() != null && !clientIds.add(set.clientId())) throw new IllegalArgumentException("Duplicate clientId");
                         }
                 }
-
-                LocalDateTime now = LocalDateTime.now();
-                LocalDateTime startedAt = request.startedAt() != null
-                                ? request.startedAt()
-                                : now;
-
-                if (startedAtInstant == null && request.completedAt() != null && request.completedAt().isBefore(startedAt)) {
-                        throw new IllegalArgumentException("completedAt must not be before startedAt");
-                }
-
                 Workout workout = new Workout();
-
                 workout.setId(UUID.randomUUID());
                 workout.setUserId(userId);
                 workout.setClientId(request.clientId());
-                workout.setRoutineId(routine.getId());
-                workout.setStartedAt(startedAt);
-                workout.setCompletedAt(request.completedAt());
-                workout.setStartedAtInstant(startedAtInstant);
-                workout.setCompletedAtInstant(completedAtInstant);
-                workout.setCalendarZone(calendarZone);
+                workout.setRoutineId(request.routineId());
+                workout.setNameSnapshot(request.nameSnapshot());
+                workout.setStartedAt(LocalDateTime.ofInstant(request.startedAt(), zone));
+                workout.setCompletedAt(LocalDateTime.ofInstant(request.completedAt(), zone));
+                workout.setStartedAtInstant(request.startedAt());
+                workout.setCompletedAtInstant(request.completedAt());
+                workout.setCalendarZone(zone.getId());
                 workout.setNotes(request.notes());
-                workout.setCreatedAt(now);
-
-                Workout savedWorkout = workoutRepository.save(workout);
-
-                List<RoutineExercise> routineExercises = routineExerciseRepository
-                                .findByRoutineIdOrderByPositionAsc(
-                                                routine.getId());
-
-                List<WorkoutExercise> workoutExercises = routineExercises
-                                .stream()
-                                .map(routineExercise -> toWorkoutExercise(
-                                                savedWorkout.getId(),
-                                                routineExercise))
-                                .toList();
-
-                List<WorkoutExercise> savedExercises = workoutExerciseRepository
-                                .saveAll(workoutExercises);
-
-                return toResponse(
-                                savedWorkout,
-                                savedExercises);
+                workout.setCreatedAt(LocalDateTime.now());
+                workoutRepository.save(workout);
+                List<MobileWorkoutExerciseRequest> orderedExercises = request.exercises().stream()
+                                .sorted(Comparator.comparingInt(MobileWorkoutExerciseRequest::position)).toList();
+                List<WorkoutExercise> savedExercises = orderedExercises.stream()
+                                .map(exercise -> {
+                                        WorkoutExercise row = new WorkoutExercise();
+                                        row.setId(UUID.randomUUID());
+                                        row.setWorkoutId(workout.getId());
+                                        row.setClientId(exercise.clientId());
+                                        row.setExerciseId(exercise.exerciseId());
+                                        row.setExerciseNameSnapshot(exercise.exerciseNameSnapshot());
+                                        row.setPosition(exercise.position());
+                                        row.setNotes(exercise.notes());
+                                        return workoutExerciseRepository.save(row);
+                                }).toList();
+                for (int i = 0; i < savedExercises.size(); i++) {
+                        WorkoutExercise savedExercise = savedExercises.get(i);
+                        MobileWorkoutExerciseRequest exercise = orderedExercises.get(i);
+                        for (WorkoutSetRequest set : exercise.sets()) {
+                                WorkoutSet row = new WorkoutSet();
+                                row.setId(UUID.randomUUID());
+                                row.setWorkoutExerciseId(savedExercise.getId());
+                                row.setClientId(set.clientId());
+                                row.setSetNumber(set.setNumber());
+                                row.setWeight(set.weight());
+                                row.setReps(set.reps());
+                                row.setRpe(set.rpe());
+                                workoutSetRepository.save(row);
+                        }
+                }
+                return toResponse(workout, savedExercises);
         }
 
         @Transactional
@@ -306,6 +349,11 @@ public class WorkoutService {
                                 routineExercise.getPosition());
                 workoutExercise.setNotes(
                                 routineExercise.getNotes());
+                // ponytail: one translation lookup per routine exercise; capped at 50 by routine validation.
+                exerciseTranslationRepository.findByExerciseId(routineExercise.getExerciseId()).stream()
+                                .sorted(Comparator.comparingInt((dev.manuel.gymtracker_api.exercise.model.ExerciseTranslation t) ->
+                                                t.getLanguage().equals("en") ? 0 : 1).thenComparing(t -> t.getLanguage()))
+                                .findFirst().ifPresent(t -> workoutExercise.setExerciseNameSnapshot(t.getName()));
 
                 return workoutExercise;
         }
@@ -356,7 +404,9 @@ public class WorkoutService {
                                                         exercise.getExerciseId(),
                                                         exercise.getPosition(),
                                                         exercise.getNotes(),
-                                                        sets);
+                                                        sets,
+                                                        exercise.getClientId(),
+                                                        exercise.getExerciseNameSnapshot());
                                 })
                                 .toList();
 
@@ -371,6 +421,7 @@ public class WorkoutService {
                                 workout.getCreatedAt(),
                                 workout.getStartedAtInstant(),
                                 workout.getCompletedAtInstant(),
-                                workout.getCalendarZone());
+                                workout.getCalendarZone(),
+                                workout.getNameSnapshot());
         }
 }

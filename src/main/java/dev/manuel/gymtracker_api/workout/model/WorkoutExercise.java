@@ -23,8 +23,14 @@ public class WorkoutExercise {
     @Column(name = "workout_id", nullable = false)
     private UUID workoutId;
 
-    @Column(name = "exercise_id", nullable = false)
+    @Column(name = "exercise_id")
     private UUID exerciseId;
+
+    @Column(name = "client_id")
+    private UUID clientId;
+
+    @Column(name = "exercise_name_snapshot", length = 255)
+    private String exerciseNameSnapshot;
 
     @Column(nullable = false)
     private int position;

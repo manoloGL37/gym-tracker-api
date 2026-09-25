@@ -21,4 +21,6 @@ public interface RoutineRepository extends JpaRepository<Routine, UUID> {
     );
 
     Optional<Routine> findByUserIdAndClientId(UUID userId, UUID clientId);
+
+    Optional<Routine> findByIdAndUserId(UUID id, UUID userId);
 }
