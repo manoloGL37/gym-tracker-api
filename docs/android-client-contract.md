@@ -136,6 +136,22 @@ RoutineSummaryResponse = Omit<RoutineResponse, 'exercises'>
 | `PUT /api/routines/{id}` | `200`; reemplazo total. Borra y recrea todas las filas hijo, por lo que los `RoutineExerciseResponse.id` cambian. No cambia el `clientId` de la rutina. |
 | `DELETE /api/routines/{id}` | `204`; después es invisible y otro delete devuelve `404`. |
 
+### Rotación de rutinas (07-10-2026)
+
+`GET /api/routine-rotation` y `PUT /api/routine-rotation` requieren bearer JWT y usan exclusivamente la cuenta autenticada. No reciben un ID de cuenta. Ambos devuelven `200` con la misma forma:
+
+```json
+{"routineIds":["11111111-1111-4111-8111-111111111111","22222222-2222-4222-8222-222222222222"]}
+```
+
+`routineIds` es una lista ordenada de IDs de servidor estables, no nombres ni `clientId`. El orden define el ciclo de entrenamiento, independiente de los días de la semana. Omitir una rutina la excluye de la rotación automática. Sin configuración, GET devuelve `{"routineIds":[]}`; esa misma forma vacía es válida para PUT y elimina toda la configuración.
+
+PUT sustituye la lista completa en una transacción y devuelve el orden persistido. No hay endpoints para mover elementos. Lista ausente/nula o elementos nulos producen `400 VALIDATION_ERROR`; duplicados producen `400 INVALID_REQUEST`; UUID malformados producen `400` con el manejo estándar de deserialización del proyecto, sin cuerpo de error garantizado. Una rutina inexistente, borrada o ajena produce `404 RESOURCE_NOT_FOUND`, sin distinguir propiedad y sin modificar la rotación anterior. Crear rutinas no cambia la rotación. Borrar una rutina elimina su referencia de la rotación en la misma transacción; conserva el orden relativo y todos los workouts históricos, incluido su `routineId` y sus snapshots.
+
+No hay revisión, ETag ni `If-Match`: prevalece la última escritura confirmada. PUT y borrado se serializan con un bloqueo de fila por cuenta; cuentas distintas pueden escribir simultáneamente. Repetir el mismo PUT deja el mismo estado mientras sus rutinas sigan disponibles, sin duplicar elementos. Un reintento antiguo puede sobrescribir una edición más reciente; Android debe ordenar/coalescer sus reemplazos pendientes por cuenta, evitar enviar uno antiguo después de uno nuevo y refrescar/reconciliar tras un `404` por borrado. Si el resultado tras timeout es incierto, GET permite consultar el estado actual. No se necesita `clientId` para PUT.
+
+Flyway V16 añade únicamente `routine_rotation(user_id, position, routine_id)`; los usuarios existentes empiezan sin filas. Android sincroniza esta configuración y calcula «Tu próxima sesión» con Room y el historial completado local. El backend no calcula la próxima sesión. `GET /api/workouts` y `GET /api/workouts/{id}` conservan `routineId` incluso tras borrar lógicamente la rutina; workouts móviles sin rutina pueden tener `routineId:null` y no identifican una rutina del ciclo.
+
 ## 5. Entrenamientos
 
 ### Snapshot histórico nativo (contrato vigente)
@@ -241,6 +257,7 @@ La ruta web `POST /api/workouts` y sus campos `startedAt`/`completedAt` conserva
 | --- | --- | --- | --- |
 | `POST /api/exercises` | Sí | usuario | Retorna el exercise existente; HTTP sigue siendo 201. |
 | `POST /api/routines` | Sí | usuario | Retorna la rutina existente; HTTP sigue siendo 201. |
+| `PUT /api/routine-rotation` | Sí | usuario | Reemplazo completo; última escritura confirmada. Un retry antiguo puede sobrescribir cambios nuevos; una rutina borrada provoca 404. |
 | `POST /api/workouts` | Sí | usuario | Retorna el workout existente; HTTP sigue siendo 201. |
 | `POST /api/workouts/mobile` | Obligatorio | usuario | Retorna el workout completo existente, incluidos hijos; HTTP sigue siendo 201. |
 | `POST .../sets` | Sí | workout exercise | Retorna el set existente; HTTP sigue siendo 201. |
@@ -323,6 +340,8 @@ Producción corre en Render (`https://gym-tracker-api-s70k.onrender.com`) y pued
 | Crear exercise | POST | `/api/exercises` | Bearer | Sí | Sí |
 | Editar/borrar exercise | PUT/DELETE | `/api/exercises/{id}` | Bearer | No | Condicional |
 | Listar/leer routines | GET | `/api/routines`, `/{id}` | Bearer | -- | Sí, lectura |
+| Leer rotación | GET | `/api/routine-rotation` | Bearer | -- | Sí, lectura; sin configuración devuelve lista vacía |
+| Reemplazar rotación | PUT | `/api/routine-rotation` | Bearer | No | Sí, mismo orden; última escritura confirmada, sujeto a disponibilidad de rutinas |
 | Crear routine | POST | `/api/routines` | Bearer | Sí | Sí |
 | Editar/borrar routine | PUT/DELETE | `/api/routines/{id}` | Bearer | No | Condicional |
 | Crear/listar/leer workout | POST/GET | `/api/workouts`, `/{id}` | Bearer | POST sí | POST sí; GET sí lectura |

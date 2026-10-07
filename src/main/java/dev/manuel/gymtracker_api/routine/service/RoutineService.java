@@ -33,14 +33,17 @@ public class RoutineService {
     private final RoutineRepository routineRepository;
     private final RoutineExerciseRepository routineExerciseRepository;
     private final ExerciseRepository exerciseRepository;
+    private final RoutineRotationService routineRotationService;
 
     public RoutineService(
             RoutineRepository routineRepository,
             RoutineExerciseRepository routineExerciseRepository,
-            ExerciseRepository exerciseRepository) {
+            ExerciseRepository exerciseRepository,
+            RoutineRotationService routineRotationService) {
         this.routineRepository = routineRepository;
         this.routineExerciseRepository = routineExerciseRepository;
         this.exerciseRepository = exerciseRepository;
+        this.routineRotationService = routineRotationService;
     }
 
     @Transactional
@@ -178,6 +181,7 @@ public void deleteRoutine(
         UUID userId,
         UUID routineId
 ) {
+    routineRotationService.remove(userId, routineId);
     Routine routine =
             routineRepository
                     .findByIdAndUserIdAndDeletedAtIsNull(
