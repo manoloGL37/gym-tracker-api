@@ -55,7 +55,9 @@ Start the application locally, then open:
 - Swagger UI: <http://localhost:8080/swagger-ui/index.html>
 - OpenAPI JSON: <http://localhost:8080/v3/api-docs>
 
-Swagger groups endpoints by Authentication, Users, Exercises, Routines, Workouts, and Statistics. Request and response DTOs are generated from the API contracts, so the documented schemas stay aligned with the application.
+Swagger groups endpoints by Authentication, Users, Exercises, Routines, Routine rotation, Workouts, and Statistics. Request and response DTOs are generated from the API contracts, so the documented schemas stay aligned with the application.
+
+`GET/PUT /api/routine-rotation` synchronize the authenticated account's ordered routine IDs (`{"routineIds":[]}` when unconfigured). PUT atomically replaces the entire list; omitted routines are excluded, creation does not add routines, and deletion removes references while preserving workout history. Last successful write wins. See [the Android API contract](docs/android-client-contract.md#rotación-de-rutinas-07-10-2026) for validation and offline retry semantics.
 
 ### Using JWT in Swagger UI
 
