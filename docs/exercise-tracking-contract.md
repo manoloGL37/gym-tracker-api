@@ -242,3 +242,6 @@ en `refresh_tokens.token_hash` (SQL CHAR frente a mapeo VARCHAR). Esa validacion
 global estricta no pasa; no se ha cambiado autenticacion ni su esquema para
 resolverla en esta tarea. La suite normal y la validacion Flyway descritas arriba
 si pasan. No se han aplicado migraciones a produccion ni realizado despliegues.
+
+
+Actualización de la auditoría final: la discrepancia token_hash descrita arriba se ha corregido mediante el mapeo JPA CHAR, sin cambiar SQL ni datos. La validación estricta y la evidencia actual sustituyen esa observación pendiente; véase [auditoría de Render](render-controlled-deployment.md).
