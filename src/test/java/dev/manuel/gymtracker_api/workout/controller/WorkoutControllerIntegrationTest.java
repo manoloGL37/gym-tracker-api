@@ -2174,13 +2174,28 @@ class WorkoutControllerIntegrationTest {
         }
         mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(update.replace(mutation.toString(), UUID.randomUUID().toString())))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("STALE_SET_VERSION"));
+        mockMvc.perform(get("/api/workouts/{id}", exercise.getWorkoutId()).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercises[0].sets[0].version").value(1))
+                .andExpect(jsonPath("$.exercises[0].sets[0].left.durationSeconds").value(30))
+                .andExpect(jsonPath("$.exercises[0].sets[0].right.durationSeconds").value(45));
         String clear = "{\"expectedVersion\":1,\"clientMutationId\":\"%s\",\"side\":\"LEFT\",\"clearAdditionalWeight\":true}".formatted(UUID.randomUUID());
         mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(clear))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.left.additionalWeightKg").isEmpty())
                 .andExpect(jsonPath("$.left.durationSeconds").value(30))
                 .andExpect(jsonPath("$.right.additionalWeightKg").value(0));
+        // A delayed retry of the original import must not overwrite newer metrics.
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.exercises[0].sets[0].version").value(2))
+                .andExpect(jsonPath("$.exercises[0].sets[0].left.additionalWeightKg").isEmpty())
+                .andExpect(jsonPath("$.exercises[0].sets[0].right.durationSeconds").value(45));
+        // Only the last mutation ID is retained: an older retry conflicts without overwriting.
+        mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(update))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("STALE_SET_VERSION"));
         User other = createUser("other-side@test.com");
         mockMvc.perform(patch(url).header("Authorization", "Bearer " + jwtService.generateToken(other.getId()))
                 .contentType(MediaType.APPLICATION_JSON).content(clear))
