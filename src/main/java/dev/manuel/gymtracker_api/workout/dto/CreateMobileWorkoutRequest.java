@@ -18,6 +18,6 @@ public record CreateMobileWorkoutRequest(
         @Schema(description = "IANA zone captured for the workout calendar date") @NotBlank String calendarZone,
         @Size(max = 500) String notes,
         @Schema(description = "Immutable historical workout display name; independent of routineId") @NotBlank @Size(max = 150) String nameSnapshot,
-        @Schema(description = "Authoritative performed exercise snapshots; empty is allowed") @NotNull @Size(max = 50) List<@Valid MobileWorkoutExerciseRequest> exercises
+        @Schema(description = "Authoritative performed exercise snapshots; empty is allowed") @NotNull @Size(max = 50) List<@NotNull @Valid MobileWorkoutExerciseRequest> exercises
 ) {
 }

@@ -1,5 +1,6 @@
 package dev.manuel.gymtracker_api.routine.service;
 
+import dev.manuel.gymtracker_api.exercise.model.Measurement;
 import dev.manuel.gymtracker_api.exercise.model.Exercise;
 import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
 import dev.manuel.gymtracker_api.routine.dto.CreateRoutineRequest;
@@ -19,7 +20,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
@@ -159,6 +159,13 @@ public class RoutineService {
 
         Routine savedRoutine = routineRepository.save(routine);
 
+        var previous = routineExerciseRepository.findByRoutineIdOrderByPositionAsc(routineId);
+        for (var old : previous) {
+            if (old.getTargetDurationSeconds() != null && request.exercises().stream().anyMatch(next ->
+                    next.exerciseId().equals(old.getExerciseId())
+                    && next.targetDurationSeconds() == null))
+                throw new IllegalArgumentException("Timed routine targets require a compatible client");
+        }
         routineExerciseRepository.deleteByRoutineId(routineId);
 
         List<RoutineExercise> routineExercises = request.exercises()
@@ -251,6 +258,13 @@ public void deleteRoutine(
     private RoutineExercise toRoutineExercise(
             UUID routineId,
             RoutineExerciseRequest request) {
+        if ((request.targetReps() == null) == (request.targetDurationSeconds() == null))
+            throw new IllegalArgumentException("Provide exactly one of targetReps or targetDurationSeconds");
+        var source = exerciseRepository.findById(request.exerciseId()).orElseThrow();
+        if (source.getMeasurement() != null &&
+                (source.getMeasurement() == Measurement.DURATION)
+                        != (request.targetDurationSeconds() != null))
+            throw new IllegalArgumentException("Routine target must match exercise measurement");
         RoutineExercise routineExercise = new RoutineExercise();
 
         routineExercise.setId(UUID.randomUUID());
@@ -259,6 +273,7 @@ public void deleteRoutine(
         routineExercise.setPosition(request.position());
         routineExercise.setSets(request.sets());
         routineExercise.setTargetReps(request.targetReps());
+        routineExercise.setTargetDurationSeconds(request.targetDurationSeconds());
         routineExercise.setRestSeconds(request.restSeconds());
         routineExercise.setNotes(request.notes());
 
@@ -276,7 +291,7 @@ public void deleteRoutine(
                         exercise.getSets(),
                         exercise.getTargetReps(),
                         exercise.getRestSeconds(),
-                        exercise.getNotes()))
+                        exercise.getNotes(), exercise.getTargetDurationSeconds()))
                 .toList();
 
         return new RoutineResponse(

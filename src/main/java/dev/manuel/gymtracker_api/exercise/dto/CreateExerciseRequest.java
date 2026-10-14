@@ -1,5 +1,9 @@
 package dev.manuel.gymtracker_api.exercise.dto;
 
+import dev.manuel.gymtracker_api.exercise.model.Measurement;
+
+import dev.manuel.gymtracker_api.exercise.model.Laterality;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -28,5 +32,7 @@ public record CreateExerciseRequest(
         @Valid
         @NotNull
         @Size(min = 1)
-        List<ExerciseTranslationRequest> translations
+        List<ExerciseTranslationRequest> translations,
+        Laterality laterality,
+        Measurement measurement
 ) {}

@@ -1783,6 +1783,25 @@ class RoutineControllerIntegrationTest {
     }
 
     @Test
+    void supportsTimedTargetsAndRejectsLegacyOverwrite() throws Exception {
+        String token = jwtService.generateToken(userA);
+        String payload = """
+                {"name":"Core","exercises":[{"exerciseId":"%s","position":0,"sets":3,
+                 "targetDurationSeconds":45,"restSeconds":60}]}
+                """.formatted(globalExerciseId);
+        mockMvc.perform(post("/api/routines").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exercises[0].targetReps").isEmpty())
+                .andExpect(jsonPath("$.exercises[0].targetDurationSeconds").value(45));
+        UUID id = routineRepository.findAll().getFirst().getId();
+        mockMvc.perform(put("/api/routines/{id}", id).header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(payload.replace("\"targetDurationSeconds\":45", "\"targetReps\":10").replace("\"position\":0", "\"position\":1")))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/routines/{id}", id).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercises[0].targetDurationSeconds").value(45));
+    }
+
+    @Test
     void shouldRejectDeletingNonExistingRoutine() throws Exception {
 
         String token = jwtService.generateToken(userA);

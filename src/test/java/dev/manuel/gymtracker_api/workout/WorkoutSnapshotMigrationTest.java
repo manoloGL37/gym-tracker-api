@@ -27,6 +27,8 @@ class WorkoutSnapshotMigrationTest {
         UUID exercise = UUID.randomUUID();
         UUID workout = UUID.randomUUID();
         UUID child = UUID.randomUUID();
+        UUID setId = UUID.randomUUID();
+        UUID clientId = UUID.randomUUID();
         UUID missingNameWorkout = UUID.randomUUID();
         try (var connection = DriverManager.getConnection(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
@@ -39,9 +41,14 @@ class WorkoutSnapshotMigrationTest {
             statement.execute("INSERT INTO workouts(id,user_id,routine_id,started_at,created_at) VALUES ('" + workout + "','" + user + "','" + routine + "',now(),now())");
             statement.execute("INSERT INTO workouts(id,user_id,started_at,created_at) VALUES ('" + missingNameWorkout + "','" + user + "',now(),now())");
             statement.execute("INSERT INTO workout_exercises(id,workout_id,exercise_id,position) VALUES ('" + child + "','" + workout + "','" + exercise + "',0)");
+            statement.execute("INSERT INTO workout_sets(id,client_id,workout_exercise_id,set_number,weight,reps) VALUES ('" + setId + "','" + clientId + "','" + child + "',1,22.50,10)");
         }
         Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .schemas(schema).load().migrate();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .schemas(schema).load().validate();
+        assertEquals(0, Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .schemas(schema).load().migrate().migrationsExecuted);
         try (var connection = DriverManager.getConnection(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.createStatement()) {
@@ -56,6 +63,22 @@ class WorkoutSnapshotMigrationTest {
             result = statement.executeQuery("SELECT name_snapshot FROM workouts WHERE id='" + missingNameWorkout + "'");
             result.next();
             assertNull(result.getString(1));
+            result = statement.executeQuery("SELECT id,client_id,weight,reps,duration_seconds,left_reps,right_reps,completed,version FROM workout_sets WHERE id='" + setId + "'");
+            result.next();
+            assertEquals(setId, result.getObject(1));
+            assertEquals(clientId, result.getObject(2));
+            assertEquals(new java.math.BigDecimal("22.50"), result.getBigDecimal(3));
+            assertEquals(10, result.getInt(4));
+            assertNull(result.getObject(5));
+            assertNull(result.getObject(6));
+            assertNull(result.getObject(7));
+            assertEquals(true, result.getBoolean(8));
+            assertEquals(0, result.getLong(9));
+            result = statement.executeQuery("SELECT laterality,measurement FROM workout_exercises WHERE id='" + child + "'");
+            result.next();
+            assertNull(result.getString(1));
+            assertNull(result.getString(2));
+
         }
     }
 }

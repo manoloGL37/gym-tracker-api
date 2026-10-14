@@ -1,5 +1,9 @@
 package dev.manuel.gymtracker_api.workout.dto;
 
+import dev.manuel.gymtracker_api.exercise.model.Measurement;
+
+import dev.manuel.gymtracker_api.exercise.model.Laterality;
+
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Min;
@@ -15,5 +19,7 @@ public record MobileWorkoutExerciseRequest(
         @Schema(description = "Immutable historical display name") @NotBlank @Size(max = 255) String exerciseNameSnapshot,
         @Min(0) int position,
         @Size(max = 500) String notes,
-        @Schema(description = "Completed performed sets; ordered by unique setNumber in responses") @NotNull List<@Valid WorkoutSetRequest> sets
+        @Schema(description = "Completed performed sets; ordered by unique setNumber in responses") @NotNull List<@NotNull @Valid WorkoutSetRequest> sets,
+        Laterality laterality,
+        Measurement measurement
 ) {}

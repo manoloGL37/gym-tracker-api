@@ -39,6 +39,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers
 class StatisticsControllerIntegrationTest {
 
+    @org.testcontainers.junit.jupiter.Container
+    static org.testcontainers.containers.PostgreSQLContainer<?> postgres =
+            new org.testcontainers.containers.PostgreSQLContainer<>("postgres:17");
+
+    @org.springframework.test.context.DynamicPropertySource
+    static void configureDatasource(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+    }
+
+
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -700,6 +713,32 @@ class StatisticsControllerIntegrationTest {
                 .andExpect(jsonPath("$.totalVolume").value(0.00))
                 .andExpect(jsonPath("$.maxWeight").value(0.00))
                 .andExpect(jsonPath("$.evolution").isEmpty());
+    }
+
+    @Test
+    void countsCompletedLogicalSetsWithoutSummingSidesOrTreatingSecondsAsReps() throws Exception {
+        User user = createUser("tracking-stats@test.com");
+        Exercise exercise = createExercise();
+        Routine routine = createRoutine(user);
+        Workout workout = createWorkout(user, routine, LocalDateTime.of(2026, 9, 5, 10, 0));
+        WorkoutExercise row = createWorkoutExercise(workout, exercise);
+        for (int number = 1; number <= 3; number++) {
+            WorkoutSet set = new WorkoutSet();
+            set.setId(UUID.randomUUID());
+            set.setWorkoutExerciseId(row.getId());
+            set.setSetNumber(number);
+            set.setCompleted(number != 3);
+            if (number == 1) set.setDurationSeconds(45);
+            else {
+                set.setLeft(new dev.manuel.gymtracker_api.workout.model.SideResult(10, null, new BigDecimal("22"), true));
+                set.setRight(new dev.manuel.gymtracker_api.workout.model.SideResult(9, null, new BigDecimal("24"), number == 2));
+            }
+            workoutSetRepository.save(set);
+        }
+        mockMvc.perform(get("/api/statistics/summary?from=2026-09-01&to=2026-09-30")
+                .header("Authorization", "Bearer " + jwtService.generateToken(user.getId())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.sets").value(2))
+                .andExpect(jsonPath("$.reps").value(0)).andExpect(jsonPath("$.volume").value(0));
     }
 
     private User createUser(String email) {

@@ -59,6 +59,7 @@ public class SecurityConfig {
                                 "/api/auth/logout"
                         ).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/mobile/login", "/api/auth/mobile/refresh", "/api/auth/mobile/logout").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(exception ->

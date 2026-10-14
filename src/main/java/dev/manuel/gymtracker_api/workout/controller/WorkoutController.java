@@ -1,5 +1,7 @@
 package dev.manuel.gymtracker_api.workout.controller;
 
+import dev.manuel.gymtracker_api.workout.dto.UpdateSetResultRequest;
+
 import dev.manuel.gymtracker_api.workout.dto.CreateWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.CreateMobileWorkoutRequest;
 import dev.manuel.gymtracker_api.workout.dto.UpdateWorkoutRequest;
@@ -55,6 +57,14 @@ public class WorkoutController {
                 workoutId,
                 workoutExerciseId,
                 request);
+    }
+
+    @PatchMapping("/{workoutId}/exercises/{workoutExerciseId}/sets/{setId}")
+    @Operation(summary = "Merge a bilateral result or one unilateral side", description = "Requires expectedVersion and stable clientMutationId. Null/omitted metrics preserve values; clearAdditionalWeight=true clears weight. Unilateral side is LEFT/RIGHT; bilateral side is absent. Stale version returns 409; retry of latest committed mutation returns current set.")
+    public WorkoutSetResponse updateSetResult(@AuthenticationPrincipal UUID userId,
+            @PathVariable UUID workoutId, @PathVariable UUID workoutExerciseId, @PathVariable UUID setId,
+            @Valid @RequestBody UpdateSetResultRequest request) {
+        return workoutService.updateSetResult(userId, workoutId, workoutExerciseId, setId, request);
     }
 
     @GetMapping("/{id}")

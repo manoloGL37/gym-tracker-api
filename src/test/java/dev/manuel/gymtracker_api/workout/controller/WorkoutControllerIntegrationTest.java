@@ -2091,6 +2091,218 @@ class WorkoutControllerIntegrationTest {
         assertEquals(1, workoutSetRepository.count());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.CsvSource({
+            "bench,BILATERAL,REPS,60",
+            "bodyweight,BILATERAL,REPS,null",
+            "row,UNILATERAL,REPS,22",
+            "step-up,UNILATERAL,REPS,22",
+            "plank,BILATERAL,DURATION,null",
+            "weighted-plank,BILATERAL,DURATION,20",
+            "side-plank,UNILATERAL,DURATION,null",
+            "weighted-side-plank,UNILATERAL,DURATION,10"
+    })
+    void tracksAllCombinationsAndRetriesWithoutDuplicating(String name, String laterality,
+            String measurement, String weight) throws Exception {
+        User user = createUser("metrics@test.com");
+        String token = jwtService.generateToken(user.getId());
+        boolean unilateral = laterality.equals("UNILATERAL");
+        boolean timed = measurement.equals("DURATION");
+        String set = unilateral
+                ? "{\"setNumber\":1,\"left\":{\"%s\":10,\"additionalWeightKg\":%s,\"completed\":true},\"right\":{\"%s\":9,\"additionalWeightKg\":%s,\"completed\":true}}"
+                    .formatted(timed ? "durationSeconds" : "repetitions", weight,
+                            timed ? "durationSeconds" : "repetitions", weight.equals("null") ? "null" : "24")
+                : "{\"setNumber\":1,\"%s\":10,\"weight\":%s}".formatted(timed ? "durationSeconds" : "reps", weight);
+        String payload = trackingSnapshot(UUID.randomUUID(), laterality, measurement, set);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/workouts/mobile").header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON).content(payload))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.exercises[0].sets.length()").value(1))
+                    .andExpect(jsonPath("$.exercises[0].laterality").value(laterality))
+                    .andExpect(jsonPath("$.exercises[0].measurement").value(measurement))
+                    .andExpect(jsonPath("$.exercises[0].sets[0].completed").value(true));
+        }
+        assertEquals(1, workoutRepository.count());
+        assertEquals(1, workoutSetRepository.count());
+        var row = workoutSetRepository.findAll().getFirst();
+        if (unilateral) {
+            assertNull(row.getReps());
+            assertNull(row.getWeight());
+            assertEquals(10, timed ? row.getLeft().getDurationSeconds() : row.getLeft().getRepetitions());
+            assertEquals(9, timed ? row.getRight().getDurationSeconds() : row.getRight().getRepetitions());
+            if (weight.equals("null")) assertNull(row.getLeft().getAdditionalWeightKg());
+            else {
+                assertEquals(0, new BigDecimal(weight).compareTo(row.getLeft().getAdditionalWeightKg()));
+                assertEquals(0, new BigDecimal("24").compareTo(row.getRight().getAdditionalWeightKg()));
+            }
+        } else {
+            assertEquals(10, timed ? row.getDurationSeconds() : row.getReps());
+            if (weight.equals("null")) assertNull(row.getWeight());
+            else assertEquals(0, new BigDecimal(weight).compareTo(row.getWeight()));
+        }
+        mockMvc.perform(get("/api/workouts/{id}", workoutRepository.findAll().getFirst().getId())
+                .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercises[0].sets.length()").value(1));
+    }
+
+    @Test
+    void mergesOneSidePreservesOtherAndHandlesLostResponseAndStaleWrite() throws Exception {
+        User user = createUser("side-update@test.com");
+        String token = jwtService.generateToken(user.getId());
+        String payload = trackingSnapshot(UUID.randomUUID(), "UNILATERAL", "DURATION",
+                "{\"setNumber\":1,\"left\":{\"durationSeconds\":30,\"additionalWeightKg\":10,\"completed\":true}}");
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(payload))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.exercises[0].sets[0].completed").value(false));
+        var row = workoutSetRepository.findAll().getFirst();
+        var exercise = workoutExerciseRepository.findById(row.getWorkoutExerciseId()).orElseThrow();
+        String url = "/api/workouts/" + exercise.getWorkoutId() + "/exercises/" + exercise.getId() + "/sets/" + row.getId();
+        UUID mutation = UUID.randomUUID();
+        String update = "{\"expectedVersion\":0,\"clientMutationId\":\"%s\",\"side\":\"RIGHT\",\"durationSeconds\":45,\"additionalWeightKg\":0,\"completed\":true}".formatted(mutation);
+        for (int retry = 0; retry < 2; retry++) {
+            mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON).content(update))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.left.durationSeconds").value(30))
+                    .andExpect(jsonPath("$.left.additionalWeightKg").value(10))
+                    .andExpect(jsonPath("$.right.durationSeconds").value(45))
+                    .andExpect(jsonPath("$.right.additionalWeightKg").value(0))
+                    .andExpect(jsonPath("$.completed").value(true))
+                    .andExpect(jsonPath("$.version").value(1));
+        }
+        mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(update.replace(mutation.toString(), UUID.randomUUID().toString())))
+                .andExpect(status().isConflict());
+        String clear = "{\"expectedVersion\":1,\"clientMutationId\":\"%s\",\"side\":\"LEFT\",\"clearAdditionalWeight\":true}".formatted(UUID.randomUUID());
+        mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(clear))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.left.additionalWeightKg").isEmpty())
+                .andExpect(jsonPath("$.left.durationSeconds").value(30))
+                .andExpect(jsonPath("$.right.additionalWeightKg").value(0));
+        User other = createUser("other-side@test.com");
+        mockMvc.perform(patch(url).header("Authorization", "Bearer " + jwtService.generateToken(other.getId()))
+                .contentType(MediaType.APPLICATION_JSON).content(clear))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/workouts/{id}", exercise.getWorkoutId())
+                .header("Authorization", "Bearer " + jwtService.generateToken(other.getId())))
+                .andExpect(status().isNotFound());
+        // Same local identity in another account is a distinct workout.
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", "Bearer " + jwtService.generateToken(other.getId()))
+                .contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isCreated());
+        assertEquals(2, workoutSetRepository.count());
+    }
+
+    @Test
+    void validatesTrackingBoundariesAndServesPublicHealth() throws Exception {
+        mockMvc.perform(get("/api/health")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("UP"));
+        User user = createUser("invalid-tracking@test.com");
+        String token = jwtService.generateToken(user.getId());
+        for (String set : List.of(
+                "{\"setNumber\":1,\"durationSeconds\":1.5}",
+                "{\"setNumber\":1,\"durationSeconds\":0}",
+                "{\"setNumber\":1,\"durationSeconds\":2147483648}",
+                "{\"setNumber\":1,\"durationSeconds\":30,\"weight\":1.001}",
+                "{\"setNumber\":1,\"durationSeconds\":30,\"weight\":-1}",
+                "{\"setNumber\":1,\"reps\":10}",
+                "{\"setNumber\":1,\"left\":{\"durationSeconds\":30,\"completed\":true}}")) {
+            mockMvc.perform(post("/api/workouts/mobile").header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON).content(trackingSnapshot(UUID.randomUUID(), "BILATERAL", "DURATION", set)))
+                    .andExpect(status().isBadRequest());
+        }
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(trackingSnapshot(UUID.randomUUID(), "UNILATERAL", "REPS",
+                        "{\"setNumber\":1,\"left\":{\"durationSeconds\":30,\"completed\":true}}")))
+                .andExpect(status().isBadRequest());
+        assertEquals(0, workoutRepository.count());
+    }
+
+    @Test
+    void concurrentSnapshotRetriesCommitOneLogicalSet() throws Exception {
+        User user = createUser("concurrent-tracking@test.com");
+        String token = jwtService.generateToken(user.getId());
+        String payload = trackingSnapshot(UUID.randomUUID(), "BILATERAL", "REPS", "{\"setNumber\":1,\"reps\":10,\"weight\":22}");
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<Integer> send = () -> mockMvc.perform(post("/api/workouts/mobile")
+                    .header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content(payload))
+                    .andReturn().getResponse().getStatus();
+            var first = executor.submit(send);
+            var second = executor.submit(send);
+            assertEquals(201, first.get(20, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(201, second.get(20, java.util.concurrent.TimeUnit.SECONDS));
+        }
+        assertEquals(1, workoutRepository.count());
+        assertEquals(1, workoutSetRepository.count());
+    }
+
+    @Test
+    void snapshotsCatalogueClassificationAndRetriesSideSetPost() throws Exception {
+        User user = createUser("routine-tracking@test.com");
+        UUID sourceId = createExercise(user.getId(), "Row");
+        var source = exerciseRepository.findById(sourceId).orElseThrow();
+        source.setLaterality(dev.manuel.gymtracker_api.exercise.model.Laterality.UNILATERAL);
+        source.setMeasurement(dev.manuel.gymtracker_api.exercise.model.Measurement.REPS);
+        exerciseRepository.save(source);
+        Routine routine = createRoutine(user.getId(), "Pull", null);
+        createRoutineExercise(routine.getId(), sourceId, 0, 3, 10, 60, null);
+        String token = jwtService.generateToken(user.getId());
+        mockMvc.perform(post("/api/workouts").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"routineId\":\"%s\"}".formatted(routine.getId())))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exercises[0].laterality").value("UNILATERAL"));
+        var performed = workoutExerciseRepository.findAll().getFirst();
+        source.setLaterality(dev.manuel.gymtracker_api.exercise.model.Laterality.BILATERAL);
+        exerciseRepository.save(source);
+        String url = "/api/workouts/" + performed.getWorkoutId() + "/exercises/" + performed.getId() + "/sets";
+        String set = """
+                {"clientId":"%s","setNumber":1,"left":{"repetitions":10,"additionalWeightKg":22,"completed":true},
+                 "right":{"repetitions":9,"additionalWeightKg":24,"completed":true}}
+                """.formatted(UUID.randomUUID());
+        for (int retry = 0; retry < 2; retry++) {
+            mockMvc.perform(post(url).header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON).content(set)).andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.left.repetitions").value(10)).andExpect(jsonPath("$.right.repetitions").value(9));
+        }
+        mockMvc.perform(patch("/api/workouts/{id}", performed.getWorkoutId()).header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"notes\":\"Old client update\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercises[0].laterality").value("UNILATERAL"))
+                .andExpect(jsonPath("$.exercises[0].sets[0].left.additionalWeightKg").value(22))
+                .andExpect(jsonPath("$.exercises[0].sets[0].right.additionalWeightKg").value(24));
+        assertEquals(1, workoutSetRepository.count());
+    }
+
+    @Test
+    void mergesBilateralTimedResultAndRejectsWrongSideAndMetric() throws Exception {
+        User user = createUser("bilateral-update@test.com");
+        String token = jwtService.generateToken(user.getId());
+        mockMvc.perform(post("/api/workouts/mobile").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(trackingSnapshot(UUID.randomUUID(), "BILATERAL", "DURATION",
+                        "{\"setNumber\":1,\"durationSeconds\":30,\"weight\":20}")))
+                .andExpect(status().isCreated());
+        var row = workoutSetRepository.findAll().getFirst();
+        var exercise = workoutExerciseRepository.findById(row.getWorkoutExerciseId()).orElseThrow();
+        String url = "/api/workouts/" + exercise.getWorkoutId() + "/exercises/" + exercise.getId() + "/sets/" + row.getId();
+        for (String invalid : List.of("\"side\":\"LEFT\"", "\"side\":\"UP\"", "\"repetitions\":10")) {
+            String payload = "{\"expectedVersion\":0,\"clientMutationId\":\"%s\",%s}".formatted(UUID.randomUUID(), invalid);
+            mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isBadRequest());
+        }
+        String payload = "{\"expectedVersion\":0,\"clientMutationId\":\"%s\",\"durationSeconds\":60,\"completed\":false}".formatted(UUID.randomUUID());
+        mockMvc.perform(patch(url).header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(payload)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.durationSeconds").value(60)).andExpect(jsonPath("$.weight").value(20))
+                .andExpect(jsonPath("$.completed").value(false)).andExpect(jsonPath("$.reps").isEmpty());
+    }
+
+    private String trackingSnapshot(UUID clientId, String laterality, String measurement, String set) {
+        return """
+                {"clientId":"%s","nameSnapshot":"Tracking test","startedAt":"2026-10-14T08:00:00Z",
+                 "completedAt":"2026-10-14T09:00:00Z","calendarZone":"Europe/Madrid",
+                 "exercises":[{"exerciseNameSnapshot":"Performed exercise","position":0,
+                    "laterality":"%s","measurement":"%s","sets":[%s]}]}
+                """.formatted(clientId, laterality, measurement, set);
+    }
+
     private User createUser(String email) {
         User user = new User();
 
