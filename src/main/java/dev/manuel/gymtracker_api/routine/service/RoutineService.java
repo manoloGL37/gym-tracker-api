@@ -166,6 +166,19 @@ public class RoutineService {
                     && next.targetDurationSeconds() == null))
                 throw new IllegalArgumentException("Timed routine targets require a compatible client");
         }
+        // ponytail: O(n*n) matching capped at 50 request rows; index by exercise ID if the cap grows.
+        // PUT replaces child IDs; match by catalog ID, never by position.
+        // Duplicate occurrences with different overrides require explicit values on every retained row.
+        for (var next : request.exercises()) {
+            if (next.lateralityOverridePresent()) continue;
+            var values = previous.stream()
+                    .filter(old -> old.getExerciseId().equals(next.exerciseId()))
+                    .map(RoutineExercise::getLateralityOverride)
+                    .collect(Collectors.toSet());
+            if (values.size() > 1)
+                throw new IllegalArgumentException("Ambiguous laterality overrides: provide lateralityOverride for every occurrence of this exercise");
+            if (!values.isEmpty()) next.setLateralityOverride(values.iterator().next());
+        }
         routineExerciseRepository.deleteByRoutineId(routineId);
 
         List<RoutineExercise> routineExercises = request.exercises()
@@ -276,6 +289,7 @@ public void deleteRoutine(
         routineExercise.setTargetDurationSeconds(request.targetDurationSeconds());
         routineExercise.setRestSeconds(request.restSeconds());
         routineExercise.setNotes(request.notes());
+        routineExercise.setLateralityOverride(request.lateralityOverride());
 
         return routineExercise;
     }
@@ -291,7 +305,7 @@ public void deleteRoutine(
                         exercise.getSets(),
                         exercise.getTargetReps(),
                         exercise.getRestSeconds(),
-                        exercise.getNotes(), exercise.getTargetDurationSeconds()))
+                        exercise.getNotes(), exercise.getTargetDurationSeconds(), exercise.getLateralityOverride()))
                 .toList();
 
         return new RoutineResponse(

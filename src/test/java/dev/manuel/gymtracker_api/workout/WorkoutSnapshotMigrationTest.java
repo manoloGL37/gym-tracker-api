@@ -156,9 +156,9 @@ class WorkoutSnapshotMigrationTest {
             var upgraded = Flyway.configure()
                     .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                     .schemas(schema).load();
-            assertEquals(1, upgraded.migrate().migrationsExecuted);
+            assertEquals(2, upgraded.migrate().migrationsExecuted);
             upgraded.validate();
-            assertEquals("17", upgraded.info().current().getVersion().toString());
+            assertEquals("18", upgraded.info().current().getVersion().toString());
             assertEquals(0, upgraded.migrate().migrationsExecuted);
             for (var entry : queries.entrySet()) {
                 try (var result = statement.executeQuery(entry.getValue())) {
@@ -171,6 +171,65 @@ class WorkoutSnapshotMigrationTest {
                 result.next();
                 assertEquals(2, result.getInt(1));
             }
+        }
+    }
+
+    @Test
+    void upgradesV17AdditivelyAndPersistsOnlyValidOverrides() throws Exception {
+        String schema = "v17_laterality_upgrade";
+        var config = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .schemas(schema);
+        config.target("17").load().migrate();
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            connection.setSchema(schema);
+            statement.execute("""
+                    INSERT INTO users(id,email,password_hash,created_at,updated_at)
+                    VALUES ('00000000-0000-0000-0000-000000000001','v17@test.invalid','x',now(),now());
+                    INSERT INTO exercises(id,source,created_at,updated_at,laterality)
+                    VALUES ('00000000-0000-0000-0000-000000000002','USER',now(),now(),'BILATERAL');
+                    INSERT INTO routines(id,user_id,name,created_at,updated_at)
+                    VALUES ('00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','Leg A',now(),now());
+                    INSERT INTO routine_exercises(id,routine_id,exercise_id,position,sets,target_reps,rest_seconds)
+                    VALUES ('00000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000003',
+                            '00000000-0000-0000-0000-000000000002',0,3,12,60);
+                    INSERT INTO workouts(id,user_id,routine_id,started_at,created_at)
+                    VALUES ('00000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001',
+                            '00000000-0000-0000-0000-000000000003',now(),now());
+                    INSERT INTO workout_exercises(id,workout_id,exercise_id,position)
+                    VALUES ('00000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000005',
+                            '00000000-0000-0000-0000-000000000002',0);
+                    """);
+            var queries = new java.util.LinkedHashMap<String, String>();
+            var before = new java.util.LinkedHashMap<String, String>();
+            for (String table : java.util.List.of("exercises", "routines", "routine_exercises", "workouts", "workout_exercises")) {
+                queries.put(table, "SELECT jsonb_agg(to_jsonb(t) ORDER BY id)::text FROM " + table + " t");
+                try (var result = statement.executeQuery(queries.get(table))) {
+                    result.next(); before.put(table, result.getString(1));
+                }
+            }
+            var upgrade = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                    .schemas(schema).load();
+            assertEquals(1, upgrade.migrate().migrationsExecuted);
+            upgrade.validate();
+            assertEquals(0, upgrade.migrate().migrationsExecuted);
+            queries.put("routine_exercises", "SELECT jsonb_agg(to_jsonb(t)-'laterality_override' ORDER BY id)::text FROM routine_exercises t");
+            for (var entry : queries.entrySet()) {
+                try (var result = statement.executeQuery(entry.getValue())) {
+                    result.next(); assertEquals(before.get(entry.getKey()), result.getString(1), entry.getKey());
+                }
+            }
+            try (var result = statement.executeQuery("SELECT laterality_override FROM routine_exercises")) {
+                result.next(); assertNull(result.getString(1));
+            }
+            for (String value : java.util.List.of("'UNILATERAL'", "'BILATERAL'", "NULL")) {
+                statement.executeUpdate("UPDATE routine_exercises SET laterality_override=" + value);
+                try (var result = statement.executeQuery("SELECT laterality_override FROM routine_exercises")) {
+                    result.next(); assertEquals(value.equals("NULL") ? null : value.replace("'", ""), result.getString(1));
+                }
+            }
+            org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException.class,
+                    () -> statement.executeUpdate("UPDATE routine_exercises SET laterality_override='LEFT'"));
         }
     }
 }

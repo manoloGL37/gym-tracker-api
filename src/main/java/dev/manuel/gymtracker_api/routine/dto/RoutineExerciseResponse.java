@@ -1,6 +1,7 @@
 package dev.manuel.gymtracker_api.routine.dto;
 
 import java.util.UUID;
+import dev.manuel.gymtracker_api.exercise.model.Laterality;
 
 public record RoutineExerciseResponse(
         UUID id,
@@ -10,5 +11,6 @@ public record RoutineExerciseResponse(
         Integer targetReps,
         int restSeconds,
         String notes,
-        Integer targetDurationSeconds
+        Integer targetDurationSeconds,
+        Laterality lateralityOverride
 ) {}

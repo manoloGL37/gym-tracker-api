@@ -443,7 +443,8 @@ public class WorkoutService {
                 workoutExercise.setExerciseId(
                                 routineExercise.getExerciseId());
                 exerciseRepository.findById(routineExercise.getExerciseId()).ifPresent(source -> {
-                        workoutExercise.setLaterality(source.getLaterality());
+                        workoutExercise.setLaterality(routineExercise.getLateralityOverride() != null
+                                        ? routineExercise.getLateralityOverride() : source.getLaterality());
                         workoutExercise.setMeasurement(source.getMeasurement());
                 });
                 if (routineExercise.getTargetDurationSeconds() != null)
