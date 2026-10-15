@@ -32,4 +32,10 @@ public record WorkoutSetRequest(
         @Valid SideResult left,
         @Valid SideResult right
 
-) {}
+) {
+    public WorkoutSetRequest {
+        // ponytail: normalize redundant zeros only; @Digits still rejects real sub-cent precision.
+        if (weight != null && weight.scale() > 2 && weight.stripTrailingZeros().scale() <= 2)
+            weight = weight.setScale(2);
+    }
+}

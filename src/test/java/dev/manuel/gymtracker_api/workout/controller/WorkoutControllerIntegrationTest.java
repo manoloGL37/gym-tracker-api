@@ -1954,10 +1954,10 @@ class WorkoutControllerIntegrationTest {
                   "calendarZone": "Europe/Madrid", "notes": "Good session", "exercises": [
                     { "clientId": "%s", "exerciseId": "%s", "exerciseNameSnapshot": "Lateral Raise",
                       "position": 1, "notes": "Slow", "sets": [
-                        { "clientId": "%s", "setNumber": 2, "weight": 10, "reps": 12 },
+                        { "clientId": "%s", "setNumber": 2, "weight": 10.000, "reps": 12 },
                         { "setNumber": 1, "weight": 10, "reps": 15 }] },
                     { "exerciseId": "%s", "exerciseNameSnapshot": "Bench Press", "position": 0,
-                      "sets": [{ "setNumber": 1, "weight": 80, "reps": 10 },
+                      "sets": [{ "setNumber": 1, "weight": 80.000, "reps": 10 },
                                { "setNumber": 2, "weight": 80, "reps": 8 }] },
                     { "exerciseId": "%s", "exerciseNameSnapshot": "Row", "position": 2, "sets": [] }
                   ] }
