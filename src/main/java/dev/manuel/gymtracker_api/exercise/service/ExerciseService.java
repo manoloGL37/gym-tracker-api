@@ -177,6 +177,8 @@ public class ExerciseService {
                 exercise.setSource(ExerciseSource.USER);
                 exercise.setSourceId(null);
                 exercise.setClientId(request.clientId());
+                if (request.laterality() != null) exercise.setLaterality(request.laterality());
+                if (request.measurement() != null) exercise.setMeasurement(request.measurement());
                 exercise.setCategory(request.category());
                 exercise.setEquipment(request.equipment());
                 exercise.setTargetMuscle(request.targetMuscle());
@@ -239,6 +241,8 @@ public class ExerciseService {
                         CreateExerciseRequest request) {
                 Exercise exercise = getOwnedExercise(exerciseId, userId);
 
+                if (request.laterality() != null) exercise.setLaterality(request.laterality());
+                if (request.measurement() != null) exercise.setMeasurement(request.measurement());
                 exercise.setCategory(request.category());
                 exercise.setEquipment(request.equipment());
                 exercise.setTargetMuscle(request.targetMuscle());
@@ -346,7 +350,7 @@ public class ExerciseService {
                                 exercise.getMuscleGroup(),
                                 exercise.getSecondaryMuscles(),
                                 translationResponses,
-                                aliasResponses);
+                                aliasResponses, exercise.getLaterality(), exercise.getMeasurement());
         }
 
         private List<String> sortedValues(List<String> values) {

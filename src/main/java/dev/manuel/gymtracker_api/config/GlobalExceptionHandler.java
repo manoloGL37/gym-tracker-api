@@ -164,6 +164,12 @@ public class GlobalExceptionHandler {
                 LocalDateTime.now());
         }
 
+        @ExceptionHandler(dev.manuel.gymtracker_api.workout.exception.StaleSetVersionException.class)
+        @ResponseStatus(HttpStatus.CONFLICT)
+        public ErrorResponse handleStaleSet(RuntimeException exception) {
+                return new ErrorResponse(409, "STALE_SET_VERSION", exception.getMessage(), LocalDateTime.now());
+        }
+
         @ExceptionHandler(IllegalArgumentException.class)
         @ResponseStatus(HttpStatus.BAD_REQUEST)
         public ErrorResponse handleIllegalArgumentException(

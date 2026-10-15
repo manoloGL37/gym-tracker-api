@@ -476,6 +476,27 @@ class ExerciseControllerIntegrationTest {
                 assertTrue(exerciseRepository.findByOwnerIdAndClientId(userA, clientId).isPresent());
         }
 
+        @Test
+        void legacyCatalogueUpdatePreservesTrackingMetadata() throws Exception {
+                Exercise exercise = createExercise(userA, "Side plank", "core", "bodyweight", ExerciseSource.USER);
+                String url = "/api/exercises/" + exercise.getId();
+                String token = jwtService.generateToken(userA);
+                String legacy = """
+                        {"translations":[{"language":"en","name":"Side plank"}]}
+                        """;
+                String modern = """
+                        {"laterality":"UNILATERAL","measurement":"DURATION",
+                         "translations":[{"language":"en","name":"Side plank"}]}
+                        """;
+                for (String payload : java.util.List.of(modern, legacy)) {
+                        mockMvc.perform(put(url).header("Authorization", "Bearer " + token)
+                                .contentType(MediaType.APPLICATION_JSON).content(payload))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.laterality").value("UNILATERAL"))
+                                .andExpect(jsonPath("$.measurement").value("DURATION"));
+                }
+        }
+
         private UUID createUser() {
 
                 User user = new User();

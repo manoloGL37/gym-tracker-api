@@ -50,6 +50,8 @@ This keeps the API straightforward to run and deploy while preserving explicit b
 
 ## API Documentation
 
+The [exercise tracking contract](docs/exercise-tracking-contract.md) specifies unilateral results, timed sets, optional load, partial updates, and Android/PWA retry semantics. Public liveness endpoint: `GET /api/health` → `200 {"status":"UP"}`.
+
 Start the application locally, then open:
 
 - Swagger UI: <http://localhost:8080/swagger-ui/index.html>

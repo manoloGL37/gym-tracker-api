@@ -1,5 +1,9 @@
 package dev.manuel.gymtracker_api.workout.model;
 
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import dev.manuel.gymtracker_api.exercise.model.Measurement;
+import dev.manuel.gymtracker_api.exercise.model.Laterality;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -7,7 +11,6 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
 import java.util.UUID;
 
 @Entity
@@ -16,6 +19,12 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 public class WorkoutExercise {
+
+    @Enumerated(EnumType.STRING)
+    private Laterality laterality;
+
+    @Enumerated(EnumType.STRING)
+    private Measurement measurement;
 
     @Id
     private UUID id;

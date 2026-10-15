@@ -1,5 +1,12 @@
 package dev.manuel.gymtracker_api.workout.service;
 
+import dev.manuel.gymtracker_api.workout.model.Side;
+import dev.manuel.gymtracker_api.exercise.model.Laterality;
+import dev.manuel.gymtracker_api.workout.model.SideResult;
+import dev.manuel.gymtracker_api.workout.exception.StaleSetVersionException;
+import dev.manuel.gymtracker_api.workout.dto.UpdateSetResultRequest;
+import dev.manuel.gymtracker_api.user.repository.UserRepository;
+import dev.manuel.gymtracker_api.exercise.model.Measurement;
 import dev.manuel.gymtracker_api.common.exception.ResourceNotFoundException;
 import dev.manuel.gymtracker_api.exercise.model.Exercise;
 import dev.manuel.gymtracker_api.exercise.repository.ExerciseRepository;
@@ -23,14 +30,12 @@ import dev.manuel.gymtracker_api.workout.model.WorkoutSet;
 import dev.manuel.gymtracker_api.workout.repository.WorkoutExerciseRepository;
 import dev.manuel.gymtracker_api.workout.repository.WorkoutRepository;
 import dev.manuel.gymtracker_api.workout.repository.WorkoutSetRepository;
-
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-
 import java.time.LocalDateTime;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -45,6 +50,7 @@ import java.util.stream.Collectors;
 @Service
 public class WorkoutService {
 
+        private final UserRepository userRepository;
         private final WorkoutRepository workoutRepository;
         private final WorkoutExerciseRepository workoutExerciseRepository;
         private final RoutineRepository routineRepository;
@@ -54,6 +60,7 @@ public class WorkoutService {
         private final ExerciseTranslationRepository exerciseTranslationRepository;
 
         public WorkoutService(
+                        UserRepository userRepository,
                         WorkoutRepository workoutRepository,
                         WorkoutExerciseRepository workoutExerciseRepository,
                         WorkoutSetRepository workoutSetRepository,
@@ -62,6 +69,7 @@ public class WorkoutService {
                         ExerciseRepository exerciseRepository,
                         ExerciseTranslationRepository exerciseTranslationRepository) {
 
+                this.userRepository = userRepository;
                 this.workoutRepository = workoutRepository;
                 this.workoutExerciseRepository = workoutExerciseRepository;
                 this.workoutSetRepository = workoutSetRepository;
@@ -75,6 +83,7 @@ public class WorkoutService {
         public WorkoutResponse createWorkout(
                         UUID userId,
                         CreateWorkoutRequest request) {
+                lockAccount(userId);
                 if (request.clientId() != null) {
                         Workout existingWorkout = workoutRepository
                                         .findByUserIdAndClientId(userId, request.clientId())
@@ -113,6 +122,7 @@ public class WorkoutService {
 
         @Transactional
         public WorkoutResponse createMobileWorkout(UUID userId, CreateMobileWorkoutRequest request) {
+                lockAccount(userId);
                 if (!ZoneId.getAvailableZoneIds().contains(request.calendarZone())) {
                         throw new IllegalArgumentException("calendarZone must be a valid IANA zone ID");
                 }
@@ -170,6 +180,8 @@ public class WorkoutService {
                                         row.setExerciseNameSnapshot(exercise.exerciseNameSnapshot());
                                         row.setPosition(exercise.position());
                                         row.setNotes(exercise.notes());
+                                        row.setLaterality(exercise.laterality());
+                                        row.setMeasurement(exercise.measurement());
                                         return workoutExerciseRepository.save(row);
                                 }).toList();
                 for (int i = 0; i < savedExercises.size(); i++) {
@@ -184,6 +196,7 @@ public class WorkoutService {
                                 row.setWeight(set.weight());
                                 row.setReps(set.reps());
                                 row.setRpe(set.rpe());
+                                applySet(row, savedExercise, set);
                                 workoutSetRepository.save(row);
                         }
                 }
@@ -217,6 +230,7 @@ public class WorkoutService {
                                         workoutExerciseId);
                 }
 
+                lockAccount(userId);
                 if (request.clientId() != null) {
                         WorkoutSet existingSet = workoutSetRepository
                                         .findByWorkoutExerciseIdAndClientId(workoutExerciseId, request.clientId())
@@ -246,6 +260,7 @@ public class WorkoutService {
                 workoutSet.setWeight(request.weight());
                 workoutSet.setReps(request.reps());
                 workoutSet.setRpe(request.rpe());
+                applySet(workoutSet, workoutExercise, request);
 
                 WorkoutSet savedSet = workoutSetRepository.save(workoutSet);
 
@@ -335,6 +350,88 @@ public class WorkoutService {
                                 exercises);
         }
 
+        private void lockAccount(UUID userId) {
+                // ponytail: serializes workout writes per account; use narrower row locks if contention grows.
+                userRepository.findByIdForUpdate(userId)
+                        .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+        }
+
+        private void applySet(WorkoutSet row, WorkoutExercise exercise, WorkoutSetRequest request) {
+                row.setDurationSeconds(request.durationSeconds());
+                row.setLeft(request.left());
+                row.setRight(request.right());
+                row.setCompleted(request.completed() == null || request.completed());
+                validateSet(row, exercise);
+        }
+
+        private void validateMetric(Integer reps, Integer seconds, boolean completed,
+                        Measurement measurement) {
+                boolean timed = measurement == Measurement.DURATION;
+                if ((timed && reps != null) || (!timed && seconds != null))
+                        throw new IllegalArgumentException("Metric does not match exercise measurement");
+                if (completed && (timed ? seconds == null : reps == null))
+                        throw new IllegalArgumentException("Completed result requires its primary metric");
+        }
+
+        private void validateSet(WorkoutSet row, WorkoutExercise exercise) {
+                if (exercise.getLaterality() == Laterality.UNILATERAL) {
+                        if (row.getWeight() != null || row.getReps() != null || row.getDurationSeconds() != null)
+                                throw new IllegalArgumentException("Unilateral sets use left/right results only");
+                        for (var result : new SideResult[]{row.getLeft(), row.getRight()}) {
+                                if (result != null) validateMetric(result.getRepetitions(), result.getDurationSeconds(),
+                                                Boolean.TRUE.equals(result.getCompleted()), exercise.getMeasurement());
+                        }
+                        row.setCompleted(row.getLeft() != null && Boolean.TRUE.equals(row.getLeft().getCompleted())
+                                        && row.getRight() != null && Boolean.TRUE.equals(row.getRight().getCompleted()));
+                } else {
+                        if (row.getLeft() != null || row.getRight() != null)
+                                throw new IllegalArgumentException("Bilateral or unknown laterality cannot contain side results");
+                        validateMetric(row.getReps(), row.getDurationSeconds(), row.isCompleted(), exercise.getMeasurement());
+                }
+        }
+
+        @Transactional
+        public WorkoutSetResponse updateSetResult(UUID userId, UUID workoutId, UUID exerciseId, UUID setId,
+                        UpdateSetResultRequest request) {
+                lockAccount(userId);
+                workoutRepository.findByIdAndUserId(workoutId, userId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Workout", workoutId));
+                WorkoutExercise exercise = workoutExerciseRepository.findById(exerciseId)
+                        .filter(e -> e.getWorkoutId().equals(workoutId))
+                        .orElseThrow(() -> new ResourceNotFoundException("WorkoutExercise", exerciseId));
+                WorkoutSet row = workoutSetRepository.findByIdAndWorkoutExerciseId(setId, exerciseId)
+                        .orElseThrow(() -> new ResourceNotFoundException("WorkoutSet", setId));
+                if (request.clientMutationId().equals(row.getLastMutationId())) return toSetResponse(row);
+                if (row.getVersion() != request.expectedVersion())
+                        throw new StaleSetVersionException();
+                if (Boolean.TRUE.equals(request.clearAdditionalWeight()) && request.additionalWeightKg() != null)
+                        throw new IllegalArgumentException("Cannot set and clear weight together");
+                boolean unilateral = exercise.getLaterality() == Laterality.UNILATERAL;
+                if (unilateral != (request.side() != null))
+                        throw new IllegalArgumentException("side is required only for unilateral results");
+                if (unilateral) {
+                        var result = request.side() == Side.LEFT ? row.getLeft() : row.getRight();
+                        if (result == null) result = new SideResult(null, null, null, false);
+                        if (request.repetitions() != null) result.setRepetitions(request.repetitions());
+                        if (request.durationSeconds() != null) result.setDurationSeconds(request.durationSeconds());
+                        if (request.additionalWeightKg() != null) result.setAdditionalWeightKg(request.additionalWeightKg());
+                        if (Boolean.TRUE.equals(request.clearAdditionalWeight())) result.setAdditionalWeightKg(null);
+                        if (request.completed() != null) result.setCompleted(request.completed());
+                        if (request.side() == Side.LEFT) row.setLeft(result);
+                        else row.setRight(result);
+                } else {
+                        if (request.repetitions() != null) row.setReps(request.repetitions());
+                        if (request.durationSeconds() != null) row.setDurationSeconds(request.durationSeconds());
+                        if (request.additionalWeightKg() != null) row.setWeight(request.additionalWeightKg());
+                        if (Boolean.TRUE.equals(request.clearAdditionalWeight())) row.setWeight(null);
+                        if (request.completed() != null) row.setCompleted(request.completed());
+                }
+                validateSet(row, exercise);
+                row.setLastMutationId(request.clientMutationId());
+                workoutSetRepository.flush();
+                return toSetResponse(row);
+        }
+
         private WorkoutExercise toWorkoutExercise(
                         UUID workoutId,
                         RoutineExercise routineExercise) {
@@ -345,6 +442,12 @@ public class WorkoutService {
                 workoutExercise.setWorkoutId(workoutId);
                 workoutExercise.setExerciseId(
                                 routineExercise.getExerciseId());
+                exerciseRepository.findById(routineExercise.getExerciseId()).ifPresent(source -> {
+                        workoutExercise.setLaterality(source.getLaterality());
+                        workoutExercise.setMeasurement(source.getMeasurement());
+                });
+                if (routineExercise.getTargetDurationSeconds() != null)
+                        workoutExercise.setMeasurement(Measurement.DURATION);
                 workoutExercise.setPosition(
                                 routineExercise.getPosition());
                 workoutExercise.setNotes(
@@ -367,7 +470,8 @@ public class WorkoutService {
                                 workoutSet.getSetNumber(),
                                 workoutSet.getWeight(),
                                 workoutSet.getReps(),
-                                workoutSet.getRpe());
+                                workoutSet.getRpe(), workoutSet.getDurationSeconds(), workoutSet.isCompleted(),
+                                workoutSet.getLeft(), workoutSet.getRight(), workoutSet.getVersion());
         }
 
         private WorkoutResponse toResponse(
@@ -406,7 +510,7 @@ public class WorkoutService {
                                                         exercise.getNotes(),
                                                         sets,
                                                         exercise.getClientId(),
-                                                        exercise.getExerciseNameSnapshot());
+                                                        exercise.getExerciseNameSnapshot(), exercise.getLaterality(), exercise.getMeasurement());
                                 })
                                 .toList();
 

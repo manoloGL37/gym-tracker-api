@@ -7,7 +7,8 @@ public record RoutineExerciseResponse(
         UUID exerciseId,
         int position,
         int sets,
-        int targetReps,
+        Integer targetReps,
         int restSeconds,
-        String notes
+        String notes,
+        Integer targetDurationSeconds
 ) {}

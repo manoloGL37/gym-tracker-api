@@ -1,5 +1,8 @@
 # Frontend Integration Contract
 
+> Extensión vigente 14-10-2026: [contrato de ejercicios, lados, duración y carga](exercise-tracking-contract.md). Sustituye las restricciones anteriores de peso/repeticiones obligatorios y la ausencia de actualización de sets.
+
+
 This document is derived from the current Spring MVC controllers, DTO records, Bean Validation annotations, services, repositories, Flyway migrations, security configuration, and integration tests. It describes the implemented API only.
 
 ## 1. Base URLs, CORS, and wire formats
@@ -187,7 +190,8 @@ Request for create and replacement update (`CreateRoutineRequest`):
 | `exerciseId` | UUID string | Required | must refer to a visible non-deleted global or caller-owned exercise |
 | `position` | number | Required primitive | integer >= 0; supplied by client; unique within the request/routine |
 | `sets` | number | Required primitive | integer >= 1 |
-| `targetReps` | number | Required primitive | integer >= 1 |
+| `targetReps` | number | Optional/null | integer >= 1; exactly one target metric |
+| `targetDurationSeconds` | number | Optional/null | integer >= 1; seconds; exactly one target metric |
 | `restSeconds` | number | Required primitive | integer >= 0 |
 | `notes` | string | Optional/null | max 500 |
 
@@ -210,7 +214,8 @@ interface RoutineExerciseResponse {
   exerciseId: string;
   position: number;           // 0-based client-supplied order
   sets: number;
-  targetReps: number;
+  targetReps: number | null;
+  targetDurationSeconds: number | null;
   restSeconds: number;
   notes: string | null;
 }
@@ -269,8 +274,11 @@ Adding a workout exercise to an existing workout is **not supported by the curre
 | --- | --- | --- | --- |
 | `clientId` | UUID string | Optional/null | Retry identity scoped to the workout exercise |
 | `setNumber` | number | Required primitive | integer >= 1 |
-| `weight` | JSON number | Required | decimal 0.00–9999.99 |
-| `reps` | number | Required primitive | integer >= 1 |
+| `weight` | JSON number | Optional/null | decimal 0.00–9999.99, up to 2 decimal places |
+| `reps` | number | Optional/null | integer >= 1; bilateral REPS metric |
+| `durationSeconds` | number | Optional/null | integer >= 1; bilateral DURATION metric |
+| `left`, `right` | object | Optional/null | Independent unilateral results; see tracking contract |
+| `completed` | boolean | Optional/null | Bilateral defaults true; unilateral derived from both sides |
 | `rpe` | JSON number | Optional/null | decimal 0.0–10.0 |
 
 The supplied `workoutId` must be caller-owned and `workoutExerciseId` must belong to that workout; otherwise `404`. Same `clientId` returns the existing set on retry. A different/new request using a duplicate `(workoutExerciseId, setNumber)` gets `400 DUPLICATE_WORKOUT_SET_NUMBER`.
@@ -286,7 +294,7 @@ The supplied `workoutId` must be caller-owned and `workoutExerciseId` must belon
 
 It returns `200 WorkoutResponse`; absent/foreign workout is `404`, invalid body is `400`.
 
-Deleting a workout is **not supported by the current API**. Editing or deleting a workout exercise is **not supported by the current API**. Editing or deleting a set is **not supported by the current API**.
+Deleting a workout is **not supported by the current API**. Editing or deleting a workout exercise is **not supported by the current API**. Editing a set result is supported by the versioned PATCH in the [tracking contract](exercise-tracking-contract.md). Deleting a set is **not supported by the current API**.
 
 ### Workout DTOs
 
@@ -318,9 +326,20 @@ interface WorkoutSetResponse {
   id: string;                    // server-generated
   clientId: string | null;
   setNumber: number;
-  weight: number;
-  reps: number;
+  weight: number | null;
+  reps: number | null;
+  durationSeconds: number | null;
+  completed: boolean;
+  left: SideResult | null;
+  right: SideResult | null;
+  version: number;
   rpe: number | null;
+}
+interface SideResult {
+  repetitions: number | null;
+  durationSeconds: number | null;
+  additionalWeightKg: number | null;
+  completed: boolean;
 }
 ```
 
@@ -423,7 +442,8 @@ The existing browser fields retain their local wall-time meaning and no offset. 
 - Access-token expiry is represented only by the JWT `exp` claim; it is not a separate response field.
 - Add a workout exercise independently: **Not supported by the current API.**
 - Edit/delete a workout exercise: **Not supported by the current API.**
-- Edit/delete a workout set: **Not supported by the current API.**
+- Edit a workout set result: supported by the versioned PATCH in the [tracking contract](exercise-tracking-contract.md).
+- Delete a workout set: **Not supported by the current API.**
 - Delete a workout: **Not supported by the current API.**
 - Clear workout notes through PATCH: **Not supported by the current API.**
 - Set arbitrary `completedAt` through PATCH: **Not supported by the current API.**

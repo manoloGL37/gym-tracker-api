@@ -32,8 +32,10 @@ public class RoutineExercise {
     @Column(nullable = false)
     private int sets;
 
-    @Column(name = "target_reps", nullable = false)
-    private int targetReps;
+    @Column(name = "target_reps")
+    private Integer targetReps;
+
+    private Integer targetDurationSeconds;
 
     @Column(name = "rest_seconds", nullable = false)
     private int restSeconds;

@@ -1,5 +1,8 @@
 # Contrato de integración: cliente Android nativo
 
+> Extensión vigente 14-10-2026: [contrato de ejercicios, lados, duración y carga](exercise-tracking-contract.md). Sustituye las restricciones anteriores de peso/repeticiones obligatorios y la ausencia de actualización de sets.
+
+
 > Fuente de verdad: controladores, DTOs, servicios, configuración de seguridad, migraciones y pruebas de integración de este repositorio, revisados el 24-09-2026. OpenAPI (`/v3/api-docs`) es útil para descubrir rutas y esquemas, pero no expresa todos los comportamientos de servicio que se detallan aquí. Si difiere de este documento, prevalece la implementación.
 
 ## 1. Vista general de la API
@@ -115,18 +118,18 @@ Todas requieren bearer y sólo operan sobre rutinas propias no borradas. `DELETE
 CreateRoutineRequest = {
   clientId?: UUID, name: string, description?: string,
   exercises: { exerciseId: UUID, position: number, sets: number,
-    targetReps: number, restSeconds: number, notes?: string }[]
+    targetReps?: number | null, targetDurationSeconds?: number | null, restSeconds: number, notes?: string }[]
 }
 RoutineResponse = {
   id: UUID, clientId: UUID | null, name: string, description: string | null,
   exercises: { id: UUID, exerciseId: UUID, position: number, sets: number,
-    targetReps: number, restSeconds: number, notes: string | null }[],
+    targetReps?: number | null, targetDurationSeconds?: number | null, restSeconds: number, notes: string | null }[],
   createdAt: LocalDateTime, updatedAt: LocalDateTime
 }
 RoutineSummaryResponse = Omit<RoutineResponse, 'exercises'>
 ```
 
-`name` es obligatorio/no blanco/máx. 150; `description` máx. 500. `exercises` es obligatorio, puede estar vacío y admite hasta 50. Cada `exerciseId` debe ser global visible o propio no borrado; de lo contrario `404`. `position` es 0-based (`>=0`), único por rutina; repetido devuelve `400 DUPLICATE_EXERCISE_POSITION`. `sets` y `targetReps` son `>=1`, `restSeconds >=0`, `notes` máx. 500. El orden de respuesta es siempre `position ASC`.
+`name` es obligatorio/no blanco/máx. 150; `description` máx. 500. `exercises` es obligatorio, puede estar vacío y admite hasta 50. Cada `exerciseId` debe ser global visible o propio no borrado; de lo contrario `404`. `position` es 0-based (`>=0`), único por rutina; repetido devuelve `400 DUPLICATE_EXERCISE_POSITION`. `sets` es `>=1`; exactamente uno de `targetReps`/`targetDurationSeconds` es entero `>=1`, `restSeconds >=0`, `notes` máx. 500. El orden de respuesta es siempre `position ASC`.
 
 | Método/ruta | Resultado |
 | --- | --- |
@@ -207,9 +210,13 @@ WorkoutResponse = {
   exercises: { id: UUID, clientId: UUID | null, exerciseId: UUID | null,
     exerciseNameSnapshot: string | null, position: number, notes: string | null,
     sets: { id: UUID, clientId: UUID | null, setNumber: number,
-      weight: decimal, reps: number, rpe: decimal | null }[] }[]
+      weight: decimal | null, reps: number | null, rpe: decimal | null,
+      durationSeconds: number | null, completed: boolean, left: SideResult | null,
+      right: SideResult | null, version: number }[] }[]
 }
-WorkoutSetRequest = { clientId?: UUID, setNumber: number, weight: decimal, reps: number, rpe?: decimal }
+WorkoutSetRequest = { clientId?: UUID, setNumber: number, weight?: decimal | null, reps?: number | null, rpe?: decimal,
+  durationSeconds?: number | null, completed?: boolean, left?: SideResult | null, right?: SideResult | null }
+SideResult = { repetitions?: number | null, durationSeconds?: number | null, additionalWeightKg?: decimal | null, completed: boolean }
 UpdateWorkoutRequest = { completed?: boolean, notes?: string }
 ```
 
@@ -272,7 +279,7 @@ Generar UUID v4 una sola vez antes de poner una creación en cola; persistirlo j
 | --- | --- | --- |
 | A. Seguras para retry en cola | POST exercise/routine/workout/set con `clientId` persistido | El servidor deduplica por la clave indicada. Resolver antes los IDs de dependencias. |
 | B. Seguras con condiciones | GETs; PUT rutina; PUT ejercicio; PATCH workout; DELETE exercise/routine; logout | Reintentar GET sólo ante red/5xx. Las mutaciones no tienen control de concurrencia/versionado: serializar por recurso, volver a leer tras fallo incierto y no reintentar DELETE tras un `404` como si fuera error. PUT rutina recrea hijos. PATCH no puede expresar limpiar notas ni timestamp final histórico. Logout móvil puede repetirse con su refresh credential. |
-| C. Inseguras / capacidad backend necesaria | Actualizar/borrar sets; actualizar/borrar/agregar workout exercises después de crear; borrar workouts; sincronización de conflictos | No hay endpoint o contrato de idempotencia/versiones para estas necesidades. La sesión nativa usa los endpoints móviles de autenticación descritos arriba. |
+| C. Inseguras / capacidad backend necesaria | Borrar sets; actualizar/borrar/agregar workout exercises después de crear; borrar workouts; sincronización de conflictos | No hay endpoint o contrato de idempotencia/versiones para estas necesidades. La sesión nativa usa los endpoints móviles de autenticación descritos arriba. |
 
 ## 10. Grafo de dependencias de sincronización
 
@@ -309,7 +316,7 @@ Producción corre en Render (`https://gym-tracker-api-s70k.onrender.com`) y pued
 ### Requeridas antes de implementar funcionalidades Android
 
 - Conversión de registros web heredados a instantes sólo tras conocer su zona original; sin ella deben conservarse como hora local.
-- Mutaciones de workout necesarias para edición offline: update/delete de sets, add/update/delete de workout exercises, delete de workout y actualización explícita de notas/completedAt según producto.
+- Mutaciones de workout necesarias para edición offline: delete de sets (update disponible mediante PATCH versionado), add/update/delete de workout exercises, delete de workout y actualización explícita de notas/completedAt según producto.
 
 ### Deseables
 

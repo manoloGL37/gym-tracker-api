@@ -33,7 +33,7 @@ public class StatisticsRepository {
                         LEFT JOIN workout_exercises we
                             ON we.workout_id = w.id
                         LEFT JOIN workout_sets ws
-                            ON ws.workout_exercise_id = we.id
+                            ON ws.workout_exercise_id = we.id AND ws.completed = TRUE
                         WHERE w.user_id = :userId
                           AND w.started_at >= :from
                           AND w.started_at < :to
@@ -77,7 +77,7 @@ public class StatisticsRepository {
                         LEFT JOIN workout_exercises we
                             ON we.workout_id = w.id
                         LEFT JOIN workout_sets ws
-                            ON ws.workout_exercise_id = we.id
+                            ON ws.workout_exercise_id = we.id AND ws.completed = TRUE
                         WHERE w.user_id = :userId
                           AND w.started_at >= :from
                           AND w.started_at < :to
@@ -116,7 +116,7 @@ public class StatisticsRepository {
                         JOIN workout_exercises we
                             ON we.workout_id = w.id
                         LEFT JOIN workout_sets ws
-                            ON ws.workout_exercise_id = we.id
+                            ON ws.workout_exercise_id = we.id AND ws.completed = TRUE
                         WHERE w.user_id = :userId
                           AND we.exercise_id = :exerciseId
                           AND w.started_at >= :from
@@ -151,7 +151,7 @@ public class StatisticsRepository {
                         JOIN workout_exercises we
                             ON we.workout_id = w.id
                         LEFT JOIN workout_sets ws
-                            ON ws.workout_exercise_id = we.id
+                            ON ws.workout_exercise_id = we.id AND ws.completed = TRUE
                         WHERE w.user_id = :userId
                           AND we.exercise_id = :exerciseId
                           AND w.started_at >= :from
