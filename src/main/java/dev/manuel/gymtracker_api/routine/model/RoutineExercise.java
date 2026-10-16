@@ -1,5 +1,8 @@
 package dev.manuel.gymtracker_api.routine.model;
 
+import dev.manuel.gymtracker_api.exercise.model.Laterality;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -36,6 +39,10 @@ public class RoutineExercise {
     private Integer targetReps;
 
     private Integer targetDurationSeconds;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "laterality_override", length = 20)
+    private Laterality lateralityOverride;
 
     @Column(name = "rest_seconds", nullable = false)
     private int restSeconds;

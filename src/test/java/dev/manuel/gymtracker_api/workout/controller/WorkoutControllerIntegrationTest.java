@@ -2473,4 +2473,73 @@ class WorkoutControllerIntegrationTest {
                 workoutSet
         );
     }
+
+    @Test
+    void capturesRoutineOverrideOnlyForFutureSnapshotsAndKeepsMobileHistoryAuthoritative() throws Exception {
+        var user = createUser("laterality@test.invalid");
+        var exerciseId = createExercise(user.getId(), "Calves");
+        var source = exerciseRepository.findById(exerciseId).orElseThrow();
+        source.setLaterality(dev.manuel.gymtracker_api.exercise.model.Laterality.BILATERAL);
+        exerciseRepository.save(source);
+        var routine = createRoutine(user.getId(), "Leg A", null);
+        var other = createRoutine(user.getId(), "Leg B", null);
+        createRoutineExercise(routine.getId(), exerciseId, 0, 3, 12, 60, null);
+        createRoutineExercise(other.getId(), exerciseId, 0, 3, 12, 60, null);
+        var token = "Bearer " + jwtService.generateToken(user.getId());
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var legacy = createWorkout(user.getId(), routine.getId());
+        var legacyRow = createWorkoutExercise(legacy.getId(), exerciseId, 0, null);
+        legacy.setCompletedAt(LocalDateTime.now());
+        workoutRepository.save(legacy);
+        String start = "{\"routineId\":\"" + routine.getId() + "\"}";
+        var active = mockMvc.perform(post("/api/workouts").header("Authorization", token)
+                .contentType(MediaType.APPLICATION_JSON).content(start))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.exercises[0].laterality").value("BILATERAL")).andReturn();
+        String activeId = mapper.readTree(active.getResponse().getContentAsString()).path("id").asText();
+        var row = routineExerciseRepository.findByRoutineIdOrderByPositionAsc(routine.getId()).get(0);
+        row.setLateralityOverride(dev.manuel.gymtracker_api.exercise.model.Laterality.UNILATERAL);
+        routineExerciseRepository.save(row);
+        var future = mockMvc.perform(post("/api/workouts").header("Authorization", token)
+                .contentType(MediaType.APPLICATION_JSON).content(start))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.exercises[0].laterality").value("UNILATERAL")).andReturn();
+        String futureId = mapper.readTree(future.getResponse().getContentAsString()).path("id").asText();
+        mockMvc.perform(get("/api/workouts/{id}", activeId).header("Authorization", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercises[0].laterality").value("BILATERAL"));
+        mockMvc.perform(post("/api/workouts").header("Authorization", token)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"routineId\":\"" + other.getId() + "\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exercises[0].laterality").value("BILATERAL"));
+        row.setLateralityOverride(dev.manuel.gymtracker_api.exercise.model.Laterality.BILATERAL);
+        routineExerciseRepository.save(row);
+        source.setLaterality(dev.manuel.gymtracker_api.exercise.model.Laterality.UNILATERAL);
+        exerciseRepository.save(source);
+        mockMvc.perform(post("/api/workouts").header("Authorization", token)
+                .contentType(MediaType.APPLICATION_JSON).content(start))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exercises[0].laterality").value("BILATERAL"));
+        row.setLateralityOverride(null);
+        routineExerciseRepository.save(row);
+        mockMvc.perform(post("/api/workouts").header("Authorization", token)
+                .contentType(MediaType.APPLICATION_JSON).content(start))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exercises[0].laterality").value("UNILATERAL"));
+        mockMvc.perform(get("/api/workouts/{id}", futureId).header("Authorization", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercises[0].laterality").value("UNILATERAL"));
+        assertNull(workoutExerciseRepository.findById(legacyRow.getId()).orElseThrow().getLaterality());
+        String mobile = """
+                {"clientId":"%s","routineId":"%s","nameSnapshot":"Historical",
+                 "startedAt":"2025-01-01T08:00:00Z","completedAt":"2025-01-01T09:00:00Z",
+                 "calendarZone":"Europe/Madrid","exercises":[{"exerciseId":"%s",
+                 "exerciseNameSnapshot":"Calves","position":0,"laterality":"BILATERAL","sets":[]}]}
+                """.formatted(UUID.randomUUID(), routine.getId(), exerciseId);
+        for (int retry = 0; retry < 2; retry++) {
+            mockMvc.perform(post("/api/workouts/mobile").header("Authorization", token)
+                    .contentType(MediaType.APPLICATION_JSON).content(mobile))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.exercises[0].laterality").value("BILATERAL"));
+        }
+        source.setLaterality(null);
+        exerciseRepository.save(source);
+        mockMvc.perform(post("/api/workouts").header("Authorization", token)
+                .contentType(MediaType.APPLICATION_JSON).content(start))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exercises[0].laterality").isEmpty());
+    }
 }

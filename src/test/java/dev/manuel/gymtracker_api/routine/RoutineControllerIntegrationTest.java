@@ -1848,4 +1848,104 @@ class RoutineControllerIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isNotFound());
     }
+
+    @Autowired
+    private tools.jackson.databind.ObjectMapper json;
+
+    private String lateralityRow(UUID exercise, int position, String field) {
+        return """
+                {"exerciseId":"%s","position":%d,"sets":3,"targetReps":12,
+                 "restSeconds":60%s}
+                """.formatted(exercise, position, field);
+    }
+
+    private String lateralityRoutine(String rows) {
+        return "{\"name\":\"Laterality\",\"exercises\":[" + rows + "]}";
+    }
+
+    private UUID postLateralityRoutine(String rows) throws Exception {
+        var result = mockMvc.perform(post("/api/routines")
+                .header("Authorization", "Bearer " + jwtService.generateToken(userA))
+                .contentType(MediaType.APPLICATION_JSON).content(lateralityRoutine(rows)))
+                .andExpect(status().isCreated()).andReturn();
+        return UUID.fromString(json.readTree(result.getResponse().getContentAsString()).path("id").asText());
+    }
+
+    @Test
+    void persistsOverridesAndPreservesOmittedFieldsAcrossLegacyReordering() throws Exception {
+        UUID routine = postLateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":\"UNILATERAL\"")
+                + "," + lateralityRow(userAExerciseId, 1, ",\"lateralityOverride\":\"BILATERAL\""));
+        var before = routineExerciseRepository.findByRoutineIdOrderByPositionAsc(routine);
+        assertThat(before.get(0).getLateralityOverride().name()).isEqualTo("UNILATERAL");
+        String legacy = lateralityRoutine(lateralityRow(userAExerciseId, 0, "") + "," + lateralityRow(globalExerciseId, 1, ""));
+        for (int retry = 0; retry < 2; retry++) {
+            mockMvc.perform(put("/api/routines/{id}", routine)
+                    .header("Authorization", "Bearer " + jwtService.generateToken(userA))
+                    .contentType(MediaType.APPLICATION_JSON).content(legacy))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.exercises[0].lateralityOverride").value("BILATERAL"))
+                    .andExpect(jsonPath("$.exercises[1].lateralityOverride").value("UNILATERAL"));
+        }
+        mockMvc.perform(get("/api/routines/{id}", routine)
+                .header("Authorization", "Bearer " + jwtService.generateToken(userA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.exercises[1].lateralityOverride").value("UNILATERAL"));
+        assertThat(routineExerciseRepository.findByRoutineIdOrderByPositionAsc(routine).get(0).getId())
+                .isNotEqualTo(before.get(1).getId());
+    }
+
+    @Test
+    void explicitNullClearsOverrideAndOtherRoutineAndCatalogAreUnchanged() throws Exception {
+        UUID first = postLateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":\"UNILATERAL\""));
+        UUID second = postLateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":\"BILATERAL\""));
+        for (String value : List.of("\"BILATERAL\"", "\"UNILATERAL\"", "null")) {
+            mockMvc.perform(put("/api/routines/{id}", first)
+                    .header("Authorization", "Bearer " + jwtService.generateToken(userA))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(lateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":" + value))))
+                    .andExpect(status().isOk());
+            assertThat(routineExerciseRepository.findByRoutineIdOrderByPositionAsc(first).get(0).getLateralityOverride())
+                    .isEqualTo(value.equals("null") ? null : dev.manuel.gymtracker_api.exercise.model.Laterality.valueOf(value.replace("\"", "")));
+        }
+        assertThat(routineExerciseRepository.findByRoutineIdOrderByPositionAsc(second).get(0).getLateralityOverride().name())
+                .isEqualTo("BILATERAL");
+        assertThat(exerciseRepository.findById(globalExerciseId).orElseThrow().getLaterality()).isNull();
+        UUID legacy = postLateralityRoutine(lateralityRow(globalExerciseId, 0, ""));
+        assertThat(routineExerciseRepository.findByRoutineIdOrderByPositionAsc(legacy).get(0).getLateralityOverride()).isNull();
+    }
+
+    @Test
+    void rejectsAmbiguousLegacyDuplicatesAtomicallyButAcceptsExplicitValues() throws Exception {
+        UUID routine = postLateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":\"UNILATERAL\"")
+                + "," + lateralityRow(globalExerciseId, 1, ",\"lateralityOverride\":null"));
+        String legacy = lateralityRoutine(lateralityRow(globalExerciseId, 0, ""));
+        mockMvc.perform(put("/api/routines/{id}", routine)
+                .header("Authorization", "Bearer " + jwtService.generateToken(userA))
+                .contentType(MediaType.APPLICATION_JSON).content(legacy)).andExpect(status().isBadRequest());
+        assertThat(routineExerciseRepository.findByRoutineIdOrderByPositionAsc(routine)).hasSize(2);
+        mockMvc.perform(put("/api/routines/{id}", routine)
+                .header("Authorization", "Bearer " + jwtService.generateToken(userA))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(lateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":null"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercises[0].lateralityOverride").isEmpty());
+    }
+
+    @Test
+    void rejectsInvalidOverrideAndCrossAccountReadsAndWrites() throws Exception {
+        UUID routine = postLateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":\"UNILATERAL\""));
+        mockMvc.perform(put("/api/routines/{id}", routine)
+                .header("Authorization", "Bearer " + jwtService.generateToken(userA))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(lateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":\"LEFT\""))))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(put("/api/routines/{id}", routine)
+                .header("Authorization", "Bearer " + jwtService.generateToken(userB))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(lateralityRoutine(lateralityRow(globalExerciseId, 0, ",\"lateralityOverride\":null"))))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/routines/{id}", routine)
+                .header("Authorization", "Bearer " + jwtService.generateToken(userB))).andExpect(status().isNotFound());
+        assertThat(routineExerciseRepository.findByRoutineIdOrderByPositionAsc(routine).get(0).getLateralityOverride().name())
+                .isEqualTo("UNILATERAL");
+    }
 }
